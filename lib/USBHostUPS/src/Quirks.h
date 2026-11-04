@@ -29,6 +29,9 @@ static const QuirkDef UPS_QUIRKS[] = {
     { 0x051D, 0x0003, QUIRK_NO_INTERRUPT_PIPE },
     // APC Smart-UPS 1000: disable_interrupt_pipe as above
     { 0x051D, 0x0004, QUIRK_NO_INTERRUPT_PIPE },
+    // The MEC0003 Q* bridge (nutdrv_qx krauler family: fabula, hunnox): every value is a
+    // string descriptor request, nothing comes on the interrupt pipe
+    { 0x0001, 0x0000, QUIRK_NO_INTERRUPT_PIPE },
     // Terminator
     { 0x0000, 0x0000, 0 }
 };

@@ -6,6 +6,7 @@
 #include "EcoFlowDriver.h"
 #include "LegrandDriver.h"
 #include "LiebertDriver.h"
+#include "MegatecDriver.h"
 #include "OpenUPSDriver.h"
 #include "PowercomDriver.h"
 #include <string.h>
@@ -13,6 +14,7 @@
 namespace {
 
 const uint16_t PHOENIXTEC_VENDORID = 0x06DA;
+const uint16_t NONAME0001_VENDORID = 0x0001;
 
 bool contains(const char* s, const char* what) {
     return s && strstr(s, what) != nullptr;
@@ -54,7 +56,19 @@ const DriverEntry DRIVERS[] = {
 
 } // namespace
 
+bool DriverRegistry::isQx(uint16_t vid, uint16_t pid) {
+    return vid == NONAME0001_VENDORID && pid == 0x0000;
+}
+
 IUPSDriver* DriverRegistry::create(uint16_t vid, uint16_t pid, const char* mfr, const char* product) {
+    // The MEC0003 bridge, nutdrv_qx_usb_device_table: "MEC" / "MEC0003" is fabula (Fideltronik
+    // LUPUS); the others, also with no strings at all (Tescom LEO and Smartbox, profiles in
+    // tescom nut-app), are read with hunnox. fuji, krauler and snr share the ID and are not
+    // ported: krauler needs the 102-byte warm-up of the Tescom LiON RT.
+    if (isQx(vid, pid)) {
+        bool mec = mfr && strcmp(mfr, "MEC") == 0 && contains(product, "MEC0003");
+        return new MegatecDriver(mec ? MegatecDriver::Transport::FABULA : MegatecDriver::Transport::HUNNOX);
+    }
     // liebert_usb_device_table: other Phoenixtec products stay generic, as upstream
     // rejects them unless the productid option is given
     if (vid == PHOENIXTEC_VENDORID && pid == 0xFFFF) return createPhoenixtec(mfr, product);

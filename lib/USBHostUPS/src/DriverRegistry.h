@@ -19,6 +19,9 @@ namespace DriverRegistry {
     // New driver for the device, owned by the caller (never null). mfr and product are the
     // USB strings of the device, nullptr or "" when it has none.
     IUPSDriver* create(uint16_t vid, uint16_t pid, const char* mfr = "", const char* product = "");
+
+    // A Q* (nutdrv_qx) bridge: a HID device without UPS usages that a Q* driver reads
+    bool isQx(uint16_t vid, uint16_t pid);
 }
 
 #endif // DRIVER_REGISTRY_H

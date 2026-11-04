@@ -422,6 +422,17 @@ void USBHostUPS::claimInterface(hid_host_device_handle_t handle) {
         }
     }
 
+    // Q* bridges (nutdrv_qx) are HID devices with a vendor-defined report descriptor:
+    // the registry knows them by VID/PID (docs/plans/nutdrv-qx-support.md, point 1)
+    if (!is_ups) {
+        hid_host_dev_info_t qx_info;
+        if (hid_host_get_device_info(handle, &qx_info) == ESP_OK &&
+            DriverRegistry::isQx(qx_info.VID, qx_info.PID)) {
+            log("INFO", "[USB] Q* bridge %04X:%04X: claimed without UPS usages", qx_info.VID, qx_info.PID);
+            is_ups = true;
+        }
+    }
+
     if (!is_ups) {
         // Not a UPS! Close it!
         log("INFO", "Ignoring non-UPS interface.");
@@ -760,6 +771,29 @@ bool USBHostUPS::requestReport(uint8_t report_id, uint8_t report_type, uint16_t 
     } else {
         log("ERROR", "requestReport FAILED: type=%d, id=%d, err=0x%x (%s)", report_type, report_id, err, esp_err_to_name(err));
     }
+    return false;
+}
+
+bool USBHostUPS::requestCommandString(uint8_t index, uint16_t lang_id, uint16_t length,
+                                      uint8_t* out, size_t out_size, size_t& out_len) {
+    out_len = 0;
+    if (!_is_ready_to_poll || !_hid_dev_handle || !out) return false;
+    if (!_link.canPoll(millis())) return false;
+
+    size_t want = length;
+    if (want > out_size) want = out_size;
+    if (want > 255) want = 255;
+
+    // Blocking control transfer: no application lock may be held here (ADR 0008)
+    esp_err_t err = hid_host_device_get_string_descriptor(_hid_dev_handle, index, lang_id, out, want, &out_len);
+    noteControlResult(err, millis());
+    if (err == ESP_OK) {
+        _stat_get_ok++;
+        _get_ok_since_claim++;
+        return true;
+    }
+    _stat_get_failed++;
+    out_len = 0;
     return false;
 }
 

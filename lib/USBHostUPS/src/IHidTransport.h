@@ -32,6 +32,17 @@ public:
     virtual bool requestReport(uint8_t report_id, uint8_t report_type, uint16_t expected_length = 8) = 0;
     // Fetches a string descriptor and hands it to the driver's parseStringDescriptor()
     virtual bool requestStringDescriptor(uint8_t string_index) = 0;
+    /**
+     * A string descriptor used as a command, as the krauler family of nutdrv_qx sends
+     * Megatec commands (fabula, hunnox): any index, an explicit langid and wLength, no
+     * language-ID request first and no memory of failed indices. The raw descriptor
+     * (bLength, bDescriptorType, UTF-16LE) goes to out; false on a failed transfer.
+     */
+    virtual bool requestCommandString(uint8_t index, uint16_t lang_id, uint16_t length,
+                                      uint8_t* out, size_t out_size, size_t& out_len) {
+        out_len = 0;
+        return false;
+    }
     // ms since the last complete INPUT report with this ID, UINT32_MAX if none yet (issue #60)
     virtual uint32_t inputReportAgeMs(uint8_t report_id, uint32_t now) const { return UINT32_MAX; }
     virtual uint16_t getVID() const { return 0; }
