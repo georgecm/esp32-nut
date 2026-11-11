@@ -2899,6 +2899,18 @@ body.auth-page {
 #zabbix-form .zbx-status { margin: 0; }
 @media (max-width: 640px) { #zabbix-form { grid-template-columns: 1fr; } }
 
+/* Tescom Connect claim banner, above every page */
+.claim-panel { margin-bottom: 1.5rem; }
+.claim-panel[hidden] { display: none; }
+.claim-body { display: flex; gap: 1.5rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.claim-text h2 { margin: 0 0 0.35rem; font-size: 1rem; }
+.claim-text p { margin: 0; opacity: 0.8; }
+.claim-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.9rem; font-weight: 700; letter-spacing: 0.12em; white-space: nowrap; }
+.claim-code[hidden] { display: none; }
+.claim-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 1rem; }
+.claim-actions a[hidden], .claim-actions button[hidden] { display: none; }
+.claim-meta { font-size: 0.85rem; opacity: 0.75; flex: 1; }
+
 /* OTA Update Styles */
 .ota-container {
     max-width: 500px;

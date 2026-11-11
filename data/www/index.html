@@ -158,6 +158,23 @@
 
             <div class="diag-banner" id="diag-banner" hidden></div>
 
+            <!-- Tescom Connect claim (docs/tescom-stick.md): from GET /api/claim, only in firmware
+                 built with ENABLE_CLOUD_CLAIM ({"state":"off"} otherwise keeps it hidden) -->
+            <section class="panel claim-panel" id="claim-panel" hidden>
+                <div class="claim-body">
+                    <div class="claim-text">
+                        <h2 id="claim-title">Link this stick to your Tescom Connect account</h2>
+                        <p id="claim-lead">Open the sign-in page, sign in with your Tescom Connect account and approve this code.</p>
+                    </div>
+                    <div class="claim-code" id="claim-code" aria-label="Code">----&#8209;----</div>
+                </div>
+                <div class="claim-actions">
+                    <a class="btn btn-primary" id="claim-link" href="#" target="_blank" rel="noopener" hidden>Open the sign-in page</a>
+                    <span class="claim-meta" id="claim-meta"></span>
+                    <button type="button" class="btn btn-outline" id="claim-unlink" hidden>Unlink</button>
+                </div>
+            </section>
+
             <!-- US-112: one .net-section per link, shown from /api/config network.links (no per-board
                  code). A section that is not about a link (Hostname, US-113) is one more
                  .net-section with data-section and no data-link: always visible. -->
@@ -377,6 +394,13 @@
                     <div class="panel-header">
                         <h2>Zabbix</h2>
                         <span class="board-profile" id="zbx-state" title="Sending state">--</span>
+                    </div>
+                    <div class="auth-alert info" id="zbx-managed" hidden>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                        <span>Set by Tescom Connect: this stick sends to its account's Zabbix host over TLS with its own certificate.</span>
                     </div>
                     <p class="auth-lead">Sends the UPS readings to a Zabbix server with the
                         <em>Tescom UPS by NUT</em> template, as tescom-agent does on a Raspberry Pi.

@@ -2903,6 +2903,18 @@ body.auth-page {
 #zabbix-form .form-actions { display: flex; gap: 0.75rem; justify-content: flex-end; flex-wrap: wrap; }
 #zabbix-form .zbx-status { margin: 0; }
 @media (max-width: 640px) { #zabbix-form { grid-template-columns: 1fr; } }
+
+/* Tescom Connect claim banner, above every page */
+.claim-panel { margin-bottom: 1.5rem; }
+.claim-panel[hidden] { display: none; }
+.claim-body { display: flex; gap: 1.5rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.claim-text h2 { margin: 0 0 0.35rem; font-size: 1rem; }
+.claim-text p { margin: 0; opacity: 0.8; }
+.claim-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.9rem; font-weight: 700; letter-spacing: 0.12em; white-space: nowrap; }
+.claim-code[hidden] { display: none; }
+.claim-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 1rem; }
+.claim-actions a[hidden], .claim-actions button[hidden] { display: none; }
+.claim-meta { font-size: 0.85rem; opacity: 0.75; flex: 1; }
 </style>
 </head>
 
@@ -3050,6 +3062,23 @@ body.auth-page {
             </header>
 
             <div class="diag-banner" id="diag-banner" hidden></div>
+
+            <!-- Tescom Connect claim (docs/tescom-stick.md): from GET /api/claim, only in firmware
+                 built with ENABLE_CLOUD_CLAIM ({"state":"off"} otherwise keeps it hidden) -->
+            <section class="panel claim-panel" id="claim-panel" hidden>
+                <div class="claim-body">
+                    <div class="claim-text">
+                        <h2 id="claim-title">Link this stick to your Tescom Connect account</h2>
+                        <p id="claim-lead">Open the sign-in page, sign in with your Tescom Connect account and approve this code.</p>
+                    </div>
+                    <div class="claim-code" id="claim-code" aria-label="Code">----&#8209;----</div>
+                </div>
+                <div class="claim-actions">
+                    <a class="btn btn-primary" id="claim-link" href="#" target="_blank" rel="noopener" hidden>Open the sign-in page</a>
+                    <span class="claim-meta" id="claim-meta"></span>
+                    <button type="button" class="btn btn-outline" id="claim-unlink" hidden>Unlink</button>
+                </div>
+            </section>
 
             <!-- US-112: one .net-section per link, shown from /api/config network.links (no per-board
                  code). A section that is not about a link (Hostname, US-113) is one more
@@ -3270,6 +3299,13 @@ body.auth-page {
                     <div class="panel-header">
                         <h2>Zabbix</h2>
                         <span class="board-profile" id="zbx-state" title="Sending state">--</span>
+                    </div>
+                    <div class="auth-alert info" id="zbx-managed" hidden>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" />
+                            <path d="M12 16v-4M12 8h.01" />
+                        </svg>
+                        <span>Set by Tescom Connect: this stick sends to its account's Zabbix host over TLS with its own certificate.</span>
                     </div>
                     <p class="auth-lead">Sends the UPS readings to a Zabbix server with the
                         <em>Tescom UPS by NUT</em> template, as tescom-agent does on a Raspberry Pi.
@@ -6470,6 +6506,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 Z('zbx-host').value = d.host || '';
                 Z('zbx-interval').value = d.interval || 10;
             }
+            const managed = !!d.managed;
+            Z('zbx-managed').hidden = !managed;
+            ['zbx-enabled', 'zbx-server', 'zbx-port', 'zbx-host', 'zbx-interval', 'btn-save-zbx'].forEach(id => { Z(id).disabled = managed; });
+            if (managed) {
+                Z('zbx-enabled').checked = true;
+                Z('zbx-server').value = d.server || '';
+                Z('zbx-port').value = d.port || 10051;
+                Z('zbx-host').value = d.host || '';
+            }
             const st = d.status || {};
             const labels = { off: 'Off', waiting: 'Waiting', ok: 'Sending', failing: 'Not reachable' };
             Z('zbx-state').textContent = labels[st.state] || '--';
@@ -6551,6 +6596,73 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         if (activeTab && activeTab.getAttribute('data-target') === 'nut') zbxStartPolling();
+    }
+
+    // Tescom Connect claim banner (docs/tescom-stick.md): GET /api/claim every 5 s while a
+    // code is shown, every 30 s once linked; hidden in firmware without the claim
+    const claimPanel = document.getElementById('claim-panel');
+    if (claimPanel) {
+        const C = id => document.getElementById(id);
+        let claimTimer = null;
+
+        function claimSchedule(ms) {
+            clearTimeout(claimTimer);
+            claimTimer = setTimeout(loadClaim, ms);
+        }
+
+        function renderClaim(d) {
+            if (!d || d.state === 'off') { claimPanel.hidden = true; return; }
+            claimPanel.hidden = false;
+            const linked = d.state === 'claimed';
+            C('claim-code').hidden = linked;
+            C('claim-unlink').hidden = !linked;
+            const link = C('claim-link');
+            link.hidden = !(d.state === 'pending' && d.verifyUrl);
+            if (!link.hidden) link.href = d.verifyUrl;
+            if (linked) {
+                C('claim-title').textContent = 'Linked to Tescom Connect';
+                C('claim-lead').textContent = '\u201c' + (d.name || 'This stick') + '\u201d in ' + (d.organization || 'your account') +
+                    '. Its readings go to the account\u2019s Zabbix.';
+                C('claim-meta').textContent = d.lastError ? 'Last error: ' + d.lastError
+                    : (d.lastHeartbeatAgoS !== undefined ? 'Cloud reached ' + d.lastHeartbeatAgoS + ' s ago' : '');
+            } else if (d.state === 'pending') {
+                C('claim-title').textContent = 'Link this stick to your Tescom Connect account';
+                C('claim-lead').textContent = 'Open the sign-in page, sign in with your Tescom Connect account and approve this code. The Tescom Connect app on this network can also approve it.';
+                C('claim-code').textContent = d.userCode;
+                const min = Math.floor((d.expiresIn || 0) / 60), sec = (d.expiresIn || 0) % 60;
+                C('claim-meta').textContent = 'Valid for ' + min + ':' + String(sec).padStart(2, '0') + '; a new code follows by itself.';
+            } else {
+                C('claim-title').textContent = 'Link this stick to your Tescom Connect account';
+                C('claim-lead').textContent = d.connected ? 'Asking Tescom Connect for a code\u2026'
+                    : 'The code appears once the stick is on a Wi-Fi with internet access.';
+                C('claim-code').textContent = '----\u2011----';
+                C('claim-meta').textContent = d.lastError ? 'Last error: ' + d.lastError : '';
+            }
+        }
+
+        async function loadClaim() {
+            let d = null;
+            try {
+                const res = await fetch('/api/claim', { cache: 'no-store' });
+                if (res.ok) d = await res.json();
+            } catch (err) {
+                console.error('Failed to fetch the claim state:', err);
+            }
+            renderClaim(d);
+            if (d && d.state !== 'off') claimSchedule(d.state === 'claimed' ? 30000 : 5000);
+        }
+
+        C('claim-unlink').addEventListener('click', async () => {
+            if (!confirm('Unlink this stick from Tescom Connect? It stops sending to Zabbix until it is approved again with a new code.')) return;
+            try {
+                await apiFetch('/api/claim/unlink', { method: 'POST' });
+            } catch (err) {
+                console.error('Unlink failed:', err);
+            }
+            claimSchedule(1500);
+        });
+
+        loadClaim();
     }
 });
 </script>

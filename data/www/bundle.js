@@ -2644,6 +2644,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 Z('zbx-host').value = d.host || '';
                 Z('zbx-interval').value = d.interval || 10;
             }
+            const managed = !!d.managed;
+            Z('zbx-managed').hidden = !managed;
+            ['zbx-enabled', 'zbx-server', 'zbx-port', 'zbx-host', 'zbx-interval', 'btn-save-zbx'].forEach(id => { Z(id).disabled = managed; });
+            if (managed) {
+                Z('zbx-enabled').checked = true;
+                Z('zbx-server').value = d.server || '';
+                Z('zbx-port').value = d.port || 10051;
+                Z('zbx-host').value = d.host || '';
+            }
             const st = d.status || {};
             const labels = { off: 'Off', waiting: 'Waiting', ok: 'Sending', failing: 'Not reachable' };
             Z('zbx-state').textContent = labels[st.state] || '--';
@@ -2725,5 +2734,72 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         if (activeTab && activeTab.getAttribute('data-target') === 'nut') zbxStartPolling();
+    }
+
+    // Tescom Connect claim banner (docs/tescom-stick.md): GET /api/claim every 5 s while a
+    // code is shown, every 30 s once linked; hidden in firmware without the claim
+    const claimPanel = document.getElementById('claim-panel');
+    if (claimPanel) {
+        const C = id => document.getElementById(id);
+        let claimTimer = null;
+
+        function claimSchedule(ms) {
+            clearTimeout(claimTimer);
+            claimTimer = setTimeout(loadClaim, ms);
+        }
+
+        function renderClaim(d) {
+            if (!d || d.state === 'off') { claimPanel.hidden = true; return; }
+            claimPanel.hidden = false;
+            const linked = d.state === 'claimed';
+            C('claim-code').hidden = linked;
+            C('claim-unlink').hidden = !linked;
+            const link = C('claim-link');
+            link.hidden = !(d.state === 'pending' && d.verifyUrl);
+            if (!link.hidden) link.href = d.verifyUrl;
+            if (linked) {
+                C('claim-title').textContent = 'Linked to Tescom Connect';
+                C('claim-lead').textContent = '\u201c' + (d.name || 'This stick') + '\u201d in ' + (d.organization || 'your account') +
+                    '. Its readings go to the account\u2019s Zabbix.';
+                C('claim-meta').textContent = d.lastError ? 'Last error: ' + d.lastError
+                    : (d.lastHeartbeatAgoS !== undefined ? 'Cloud reached ' + d.lastHeartbeatAgoS + ' s ago' : '');
+            } else if (d.state === 'pending') {
+                C('claim-title').textContent = 'Link this stick to your Tescom Connect account';
+                C('claim-lead').textContent = 'Open the sign-in page, sign in with your Tescom Connect account and approve this code. The Tescom Connect app on this network can also approve it.';
+                C('claim-code').textContent = d.userCode;
+                const min = Math.floor((d.expiresIn || 0) / 60), sec = (d.expiresIn || 0) % 60;
+                C('claim-meta').textContent = 'Valid for ' + min + ':' + String(sec).padStart(2, '0') + '; a new code follows by itself.';
+            } else {
+                C('claim-title').textContent = 'Link this stick to your Tescom Connect account';
+                C('claim-lead').textContent = d.connected ? 'Asking Tescom Connect for a code\u2026'
+                    : 'The code appears once the stick is on a Wi-Fi with internet access.';
+                C('claim-code').textContent = '----\u2011----';
+                C('claim-meta').textContent = d.lastError ? 'Last error: ' + d.lastError : '';
+            }
+        }
+
+        async function loadClaim() {
+            let d = null;
+            try {
+                const res = await fetch('/api/claim', { cache: 'no-store' });
+                if (res.ok) d = await res.json();
+            } catch (err) {
+                console.error('Failed to fetch the claim state:', err);
+            }
+            renderClaim(d);
+            if (d && d.state !== 'off') claimSchedule(d.state === 'claimed' ? 30000 : 5000);
+        }
+
+        C('claim-unlink').addEventListener('click', async () => {
+            if (!confirm('Unlink this stick from Tescom Connect? It stops sending to Zabbix until it is approved again with a new code.')) return;
+            try {
+                await apiFetch('/api/claim/unlink', { method: 'POST' });
+            } catch (err) {
+                console.error('Unlink failed:', err);
+            }
+            claimSchedule(1500);
+        });
+
+        loadClaim();
     }
 });
