@@ -175,7 +175,9 @@ footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
       { title: dev ? (otg ? "Power for the UPS port" : "Bridge the IN-OUT pads") : "Look at the two ports", hl: dev ? (otg ? ["otg"] : ["pads"]) : ["usbport", "power"],
         body: dev ? (otg
             ? '<p>The USB port of the board can’t power the UPS’s USB chip by itself. A powered OTG adapter (Y-cable) feeds 5 V into that port.</p><p>Plug the charger into the adapter’s power input.</p>'
-            : '<p>On the back, next to the two USB-C ports, two small pads are marked <code>IN-OUT</code>. Bridge them with a blob of solder. This sends the board’s 5 V out of the <b>USB</b> port, so the UPS’s USB chip is powered.</p>' +
+            : '<p>On the top side, just right of the upper USB-C port and under pins 12/13, two small pads sit next to the label <code>IN-OUT</code>. Bridge them with a blob of solder. This sends the board’s 5 V out of the <b>USB</b> port, so the UPS’s USB chip is powered.</p>' +
+              '<p>Which port is which on the N16R8 clone: the <b>upper</b> USB-C port is <b>USB</b> (native, to the UPS); the <b>lower</b> one, next to the small square chip (the USB-serial converter), is <b>COM</b> (power, log, flashing).</p>' +
+              '<p>Optional: bridge the two pads next to the label <code>RGB</code> too, so the firmware’s status LED works.</p>' +
               '<div class="note">Once bridged, never plug a computer into the <b>USB</b> port while the board is also powered from <b>COM</b>: two 5 V sources would meet. Use <b>COM</b> for the computer.</div>')
           : '<p>The stick has two ports: <b>UPS</b> (data to the UPS) and <b>5 V</b> (power). They are not interchangeable.</p>',
         checks: dev ? [otg ? "The OTG adapter has a power input and the charger is plugged into it" : "IN-OUT pads are bridged (check with a multimeter: 5 V on the USB port when powered)"] : ["I can tell the UPS port from the 5 V port"] },
