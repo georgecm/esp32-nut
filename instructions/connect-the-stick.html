@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect the Stick</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #1b1f24; --muted: #5b6470; --line: #d8dde3;
+  --accent: #0a66c2; --accent-soft: #e3effb; --ok: #1f8a4c; --warn: #b25e00; --warn-soft: #fff3e0;
+  --board: #1e5a3a; --board-edge: #134028; --metal: #b9c0c8; --cable: #2f3640; --power: #d23f31;
+  --data: #0a66c2; --ups: #e9ecef; --ups-edge: #9aa3ad;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418; --card: #1a1f25; --ink: #e8ecf0; --muted: #9aa5b1; --line: #2c333b;
+    --accent: #5aa9f0; --accent-soft: #16283a; --ok: #4cc17f; --warn: #f0a24a; --warn-soft: #2d2213;
+    --board: #2a7a50; --board-edge: #1b5236; --metal: #8f98a2; --cable: #c8d0d8; --power: #ff6b5c;
+    --data: #5aa9f0; --ups: #252b32; --ups-edge: #59626c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418; --card: #1a1f25; --ink: #e8ecf0; --muted: #9aa5b1; --line: #2c333b;
+  --accent: #5aa9f0; --accent-soft: #16283a; --ok: #4cc17f; --warn: #f0a24a; --warn-soft: #2d2213;
+  --board: #2a7a50; --board-edge: #1b5236; --metal: #8f98a2; --cable: #c8d0d8; --power: #ff6b5c;
+  --data: #5aa9f0; --ups: #252b32; --ups-edge: #59626c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+h1 { font-size: 1.6rem; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 20px; }
+.toggles { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 8px 12px; font: inherit; font-size: .9rem; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg .lbl { padding: 8px 10px; font-size: .8rem; color: var(--muted); border-right: 1px solid var(--line); align-self: center; }
+.layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; }
+@media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+ol.steps button { width: 100%; text-align: left; display: flex; gap: 10px; align-items: center; padding: 10px 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font: inherit; cursor: pointer; }
+ol.steps button[aria-current="step"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.num { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: .8rem; font-weight: 700;
+  background: var(--accent-soft); color: var(--accent); }
+.done .num { background: var(--ok); color: #fff; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+.card h2 { margin: 0 0 8px; font-size: 1.2rem; }
+.card p { margin: 0 0 10px; }
+.card ul { margin: 0 0 10px; padding-left: 20px; }
+svg { width: 100%; height: auto; display: block; margin: 8px 0 12px; }
+.note { background: var(--warn-soft); border-left: 3px solid var(--warn); padding: 8px 12px; border-radius: 4px; margin: 10px 0; font-size: .92rem; }
+.check { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+.check input { margin-top: 4px; width: 18px; height: 18px; accent-color: var(--ok); }
+.nav { display: flex; justify-content: space-between; margin-top: 14px; }
+.nav button { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); font: inherit; cursor: pointer; }
+.nav button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.nav button:disabled { opacity: .4; cursor: default; }
+code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; font-size: .9em; }
+.hl { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .hl { animation: none; } .flow { animation: none !important; } }
+.flow { stroke-dasharray: 6 6; animation: dash 1s linear infinite; }
+@keyframes dash { to { stroke-dashoffset: -12; } }
+.hidden { display: none; }
+footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Connect the Tescom USB-to-Wi-Fi stick</h1>
+  <p class="sub">What plugs in where, step by step. Tick each check before moving on.</p>
+
+  <div class="toggles">
+    <div class="seg" role="group" aria-label="Board">
+      <span class="lbl">Board</span>
+      <button data-board="dev" aria-pressed="true">ESP32-S3 dev board</button>
+      <button data-board="product" aria-pressed="false">Tescom stick</button>
+    </div>
+    <div class="seg" role="group" aria-label="5 V for the UPS port" id="vbusSeg">
+      <span class="lbl">UPS port 5 V</span>
+      <button data-vbus="bridge" aria-pressed="true">IN-OUT pads bridged</button>
+      <button data-vbus="otg" aria-pressed="false">Powered OTG adapter</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <nav aria-label="Steps"><ol class="steps" id="stepList"></ol></nav>
+    <section class="card" id="panel" aria-live="polite"></section>
+  </div>
+
+  <footer>
+    Firmware: esp32-nut fork, env <code>tescom-stick</code>. Plan and open items: <code>docs/tescom-stick.md</code>.
+    Not yet tried with a real UPS: the steps follow the hardware notes and may change after the first test.
+  </footer>
+</main>
+
+<script>
+(function () {
+  var state = { board: "dev", vbus: "bridge", step: 0, checks: {} };
+  try { var saved = JSON.parse(localStorage.getItem("stick-steps") || "null"); if (saved) state = Object.assign(state, saved); } catch (e) {}
+  function save() { try { localStorage.setItem("stick-steps", JSON.stringify(state)); } catch (e) {} }
+
+  // ---------- the diagram ----------
+  // parts: highlight keys -> which elements pulse in a step
+  function diagram(hl) {
+    var dev = state.board === "dev", otg = state.vbus === "otg";
+    function on(k) { return hl.indexOf(k) >= 0 ? ' class="hl"' : ""; }
+    var s = '<svg viewBox="0 0 720 300" role="img" aria-label="Wiring diagram">';
+    // UPS
+    s += '<g' + on("ups") + '><rect x="20" y="70" width="150" height="170" rx="10" fill="var(--ups)" stroke="var(--ups-edge)" stroke-width="2"/>' +
+         '<text x="95" y="100" text-anchor="middle" font-size="15" font-weight="700" fill="var(--ink)">UPS</text>' +
+         '<text x="95" y="120" text-anchor="middle" font-size="11" fill="var(--muted)">LEO / Smartbox / LiON</text>' +
+         '<rect x="140" y="160" width="24" height="22" rx="2" fill="var(--metal)" stroke="var(--ups-edge)"/>' +
+         '<text x="120" y="200" text-anchor="middle" font-size="10" fill="var(--muted)">USB-B</text></g>';
+    // UPS cable
+    var cableEnd = otg ? 330 : 400;
+    s += '<g' + on("upscable") + '><path d="M164 171 C 230 171, 250 150, ' + cableEnd + ' 150" fill="none" stroke="var(--data)" stroke-width="5" class="flow"/></g>';
+    if (otg) {
+      s += '<g' + on("otg") + '><rect x="330" y="132" width="70" height="36" rx="6" fill="var(--card)" stroke="var(--accent)" stroke-width="2"/>' +
+           '<text x="365" y="154" text-anchor="middle" font-size="10" fill="var(--ink)">OTG + power</text>' +
+           '<path d="M365 168 L365 250 L300 250" fill="none" stroke="var(--power)" stroke-width="3"/>' +
+           '<text x="300" y="268" font-size="10" fill="var(--power)">5 V in</text></g>';
+      s += '<path d="M400 150 L430 150" stroke="var(--data)" stroke-width="5"/>';
+    } else {
+      s += '<path d="M400 150 L430 150" stroke="var(--data)" stroke-width="5"/>';
+    }
+    // Board
+    s += '<g' + on("board") + '><rect x="430" y="60" width="200" height' + '="190" rx="8" fill="var(--board)" stroke="var(--board-edge)" stroke-width="3"/>' +
+         '<rect x="490" y="90" width="80" height="70" rx="4" fill="var(--metal)"/>' +
+         '<text x="530" y="130" text-anchor="middle" font-size="11" fill="#1b1f24">ESP32-S3</text>' +
+         '<text x="530" y="230" text-anchor="middle" font-size="12" fill="#fff">' + (dev ? "DevKitC-1 N16R8" : "Tescom stick") + '</text></g>';
+    // USB (native OTG) port, left on the drawing
+    s += '<g' + on("usbport") + '><rect x="418" y="138" width="24" height="24" rx="4" fill="var(--metal)" stroke="var(--ink)"/>' +
+         '<text x="452" y="190" font-size="11" font-weight="700" fill="#fff">' + (dev ? "USB" : "UPS") + '</text></g>';
+    if (dev) {
+      // COM (UART) port
+      s += '<g' + on("comport") + '><rect x="618" y="138" width="24" height="24" rx="4" fill="var(--metal)" stroke="var(--ink)"/>' +
+           '<text x="585" y="190" font-size="11" font-weight="700" fill="#fff">COM</text></g>';
+      // IN-OUT pads
+      s += '<g' + on("pads") + '><rect x="450" y="70" width="34" height="14" rx="2" fill="' + (otg ? "var(--metal)" : "#e0b84a") + '"/>' +
+           '<text x="467" y="64" text-anchor="middle" font-size="10" fill="var(--ink)">IN-OUT</text></g>';
+      // Power into COM
+      s += '<g' + on("power") + '><path d="M642 150 L700 150" stroke="var(--power)" stroke-width="5"/>' +
+           '<rect x="680" y="180" width="34" height="50" rx="6" fill="var(--card)" stroke="var(--power)" stroke-width="2"/>' +
+           '<path d="M700 150 L700 180" stroke="var(--power)" stroke-width="5"/>' +
+           '<text x="697" y="246" text-anchor="middle" font-size="10" fill="var(--power)">5 V</text></g>';
+    } else {
+      s += '<g' + on("power") + '><rect x="618" y="138" width="24" height="24" rx="4" fill="var(--metal)" stroke="var(--ink)"/>' +
+           '<path d="M642 150 L700 150 L700 180" fill="none" stroke="var(--power)" stroke-width="5"/>' +
+           '<rect x="680" y="180" width="34" height="50" rx="6" fill="var(--card)" stroke="var(--power)" stroke-width="2"/>' +
+           '<text x="697" y="246" text-anchor="middle" font-size="10" fill="var(--power)">5 V</text></g>';
+    }
+    // Wi-Fi
+    s += '<g' + on("wifi") + '><path d="M530 40 a26 26 0 0 1 36 0 M536 47 a16 16 0 0 1 24 0" fill="none" stroke="var(--accent)" stroke-width="3" transform="translate(-18,0)"/>' +
+         '<circle cx="530" cy="54" r="3" fill="var(--accent)"/>' +
+         '<text x="560" y="40" font-size="11" fill="var(--accent)">Wi-Fi · NUT 3493</text></g>';
+    s += '</svg>';
+    return s;
+  }
+
+  // ---------- the steps ----------
+  function steps() {
+    var dev = state.board === "dev", otg = state.vbus === "otg";
+    return [
+      { title: "What you need", hl: [],
+        body: '<ul>' +
+          '<li>The ' + (dev ? 'ESP32-S3 DevKitC-1 (N16R8) flashed with the <code>tescom-stick</code> firmware' : 'Tescom stick') + '.</li>' +
+          '<li>The UPS’s own USB cable (USB-B on the UPS side) and, if its other end is USB-A, a USB-C OTG adapter' + (otg ? ' <b>with a power input</b>' : '') + '.</li>' +
+          '<li>A 5 V USB phone charger (1 A is plenty) and a USB-C cable for power.</li>' +
+          (dev && !otg ? '<li>A soldering iron, for the IN-OUT pads (once per board).</li>' : '') +
+          '<li>The Wi-Fi name and password of the place the UPS sits.</li></ul>',
+        checks: ["I have everything on the list"] },
+      { title: dev ? (otg ? "Power for the UPS port" : "Bridge the IN-OUT pads") : "Look at the two ports", hl: dev ? (otg ? ["otg"] : ["pads"]) : ["usbport", "power"],
+        body: dev ? (otg
+            ? '<p>The USB port of the board can’t power the UPS’s USB chip by itself. A powered OTG adapter (Y-cable) feeds 5 V into that port.</p><p>Plug the charger into the adapter’s power input.</p>'
+            : '<p>On the back, next to the two USB-C ports, two small pads are marked <code>IN-OUT</code>. Bridge them with a blob of solder. This sends the board’s 5 V out of the <b>USB</b> port, so the UPS’s USB chip is powered.</p>' +
+              '<div class="note">Once bridged, never plug a computer into the <b>USB</b> port while the board is also powered from <b>COM</b>: two 5 V sources would meet. Use <b>COM</b> for the computer.</div>')
+          : '<p>The stick has two ports: <b>UPS</b> (data to the UPS) and <b>5 V</b> (power). They are not interchangeable.</p>',
+        checks: dev ? [otg ? "The OTG adapter has a power input and the charger is plugged into it" : "IN-OUT pads are bridged (check with a multimeter: 5 V on the USB port when powered)"] : ["I can tell the UPS port from the 5 V port"] },
+      { title: "UPS cable into the " + (dev ? "USB" : "UPS") + " port", hl: ["upscable", "usbport"].concat(otg ? ["otg"] : []),
+        body: '<p>Plug the UPS’s USB cable into the UPS (square USB-B socket on its back) and the other end into the ' +
+          (dev ? '<b>USB</b> port of the board (the one wired to the ESP32-S3, not COM)' : '<b>UPS</b> port of the stick') + (otg ? ', through the powered OTG adapter' : '') + '.</p>' +
+          '<p>The stick reads the UPS like a computer would: the UPS needs no setting changed.</p>',
+        checks: ["The UPS cable is in the " + (dev ? "USB" : "UPS") + " port"] },
+      { title: "Power on", hl: ["power", dev ? "comport" : "board"],
+        body: '<p>Plug the charger into the ' + (dev ? '<b>COM</b>' : '<b>5 V</b>') + ' port.' + (dev ? ' A computer on COM works too, and shows the log at 115200 baud.' : '') + '</p>' +
+          '<p>After about 5 seconds the stick opens a Wi-Fi network for setup: <code>Tescom-Stick-Setup</code>.</p>' +
+          '<div class="note">Development builds still use the shared password <code>12345678</code>. Shipped sticks will have their own password on the label.</div>',
+        checks: ["Tescom-Stick-Setup shows up in the Wi-Fi list"] },
+      { title: "Put the stick on your Wi-Fi", hl: ["wifi"],
+        body: '<ol><li>Join <code>Tescom-Stick-Setup</code> from a phone or laptop.</li>' +
+          '<li>Open <code>http://192.168.4.1</code> (it may open by itself).</li>' +
+          '<li>Choose your Wi-Fi, type its password, save. The stick restarts and joins it.</li>' +
+          '<li>Set the stick’s login when asked; keep it, the app needs it for UPS commands.</li></ol>' +
+          '<p>The stick then answers as <code>tescom-stick-xxxxxx.local</code>.</p>',
+        checks: ["The setup page saved the Wi-Fi", "The setup network disappeared (the stick joined my Wi-Fi)"] },
+      { title: "Find it in Tescom Connect", hl: ["wifi", "ups"],
+        body: '<p>On a computer on the same Wi-Fi: <b>Settings → Connection → Find UPSs</b>. The stick shows as <b>Tescom stick (Leo LCD)</b> or <b>(Leo SmartBox)</b>, with the model it read from the UPS. UPS name: <code>ups</code>, port 3493.</p>' +
+          '<p>Not listed? Open <code>http://tescom-stick-xxxxxx.local</code> and check the System Logs page: it should show <code>MegatecDriver (hunnox)</code> and <code>[Megatec] profile leo</code> (or smartbox).</p>',
+        checks: ["The app lists the stick", "Readings (voltage, charge, load) look right"] }
+    ];
+  }
+
+  // ---------- render ----------
+  var list = document.getElementById("stepList"), panel = document.getElementById("panel");
+  function key(i, j) { return state.board + ":" + state.vbus + ":" + i + ":" + j; }
+  function stepDone(i, st) { return st.checks.every(function (_, j) { return state.checks[key(i, j)]; }); }
+
+  function render() {
+    var all = steps();
+    if (state.step >= all.length) state.step = all.length - 1;
+    document.getElementById("vbusSeg").classList.toggle("hidden", state.board !== "dev");
+    document.querySelectorAll("[data-board]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.board === state.board)); });
+    document.querySelectorAll("[data-vbus]").forEach(function (b) { b.setAttribute("aria-pressed", String(b.dataset.vbus === state.vbus)); });
+
+    list.innerHTML = "";
+    all.forEach(function (st, i) {
+      var li = document.createElement("li"), b = document.createElement("button");
+      if (stepDone(i, st)) li.className = "done";
+      b.innerHTML = '<span class="num">' + (stepDone(i, st) ? "✓" : (i + 1)) + '</span><span>' + st.title + '</span>';
+      if (i === state.step) b.setAttribute("aria-current", "step");
+      b.onclick = function () { state.step = i; save(); render(); };
+      li.appendChild(b); list.appendChild(li);
+    });
+
+    var st = all[state.step];
+    var html = '<h2>' + (state.step + 1) + '. ' + st.title + '</h2>' + diagram(st.hl) + st.body;
+    st.checks.forEach(function (c, j) {
+      html += '<label class="check"><input type="checkbox" data-j="' + j + '"' + (state.checks[key(state.step, j)] ? " checked" : "") + '> <span>' + c + '</span></label>';
+    });
+    html += '<div class="nav"><button id="prev"' + (state.step === 0 ? " disabled" : "") + '>Back</button>' +
+            '<button id="next" class="primary"' + (state.step === all.length - 1 ? " disabled" : "") + '>Next</button></div>';
+    panel.innerHTML = html;
+    panel.querySelectorAll("input[type=checkbox]").forEach(function (cb) {
+      cb.onchange = function () { state.checks[key(state.step, +cb.dataset.j)] = cb.checked; save(); render(); };
+    });
+    document.getElementById("prev").onclick = function () { state.step--; save(); render(); };
+    document.getElementById("next").onclick = function () { state.step++; save(); render(); };
+  }
+
+  document.querySelectorAll("[data-board]").forEach(function (b) { b.onclick = function () { state.board = b.dataset.board; save(); render(); }; });
+  document.querySelectorAll("[data-vbus]").forEach(function (b) { b.onclick = function () { state.vbus = b.dataset.vbus; save(); render(); }; });
+  render();
+})();
+</script>
+</body>
+</html>
