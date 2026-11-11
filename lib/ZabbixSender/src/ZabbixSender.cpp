@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 namespace Zabbix {
 
@@ -237,9 +238,29 @@ bool parseReply(const uint8_t* data, size_t len, Outcome& out) {
     return true;
 }
 
+const char* validate(const Settings& s) {
+    if (s.server.size() > 253) return "server: too long";
+    for (char c : s.server) {
+        if (!(isalnum((unsigned char)c) || c == '.' || c == '-' || c == ':' || c == '_'))
+            return "server: a host name or IP address, without spaces";
+    }
+    // Zabbix host names: letters, digits, spaces, dots, dashes and underscores, 128 at most
+    if (s.host.size() > 128) return "host: 128 characters at most";
+    for (char c : s.host) {
+        if (!(isalnum((unsigned char)c) || c == '.' || c == ' ' || c == '_' || c == '-'))
+            return "host: only letters, digits, spaces, dots, dashes and underscores";
+    }
+    if (!s.host.empty() && (s.host.front() == ' ' || s.host.back() == ' ')) return "host: no space at either end";
+    if (s.port == 0) return "port: 1-65535";
+    if (s.interval_s < 2 || s.interval_s > 3600) return "interval: 2-3600 seconds";
+    if (s.enabled && s.server.empty()) return "server: required";
+    if (s.enabled && s.host.empty()) return "host: required";
+    return nullptr;
+}
+
 void Backlog::add(const std::vector<Item>& items) {
     for (const auto& i : items) _items.push_back(i);
-    while (_items.size() > _max) {
+    while (_items.size() > _capacity) {
         _items.pop_front();
         _dropped++;
     }

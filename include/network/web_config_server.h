@@ -11,6 +11,7 @@
 #include "AuthService.h"
 #include "CredentialStore.h"
 #include "LoginThrottle.h"
+#include "network/zabbix_client.h"
 #include "SessionTable.h"
 #include "RecoveryWindow.h"
 #include "DiagnosticLED.h"
@@ -38,6 +39,7 @@ public:
     void setAutoShutdown(AutoShutdown* auto_shutdown);
     // Hostname of the Network page (US-113): store and name loaded at boot ("" = default)
     void setHostnameStore(HostnameStore* store, const String& saved);
+    void setZabbixClient(ZabbixClient* client) { zabbix_client = client; }
 
 private:
     WebServer server;
@@ -61,6 +63,7 @@ private:
     DiagnosticLED* status_led = nullptr;
     AutoShutdown* auto_shutdown = nullptr;
     HostnameStore* hostname_store = nullptr;
+    ZabbixClient* zabbix_client = nullptr;
     String saved_hostname;
 
     void handleConnect();
@@ -71,6 +74,8 @@ private:
     // US-114: UPS connected and offering shutdown.default
     AutoShutdownAvailability autoShutdownAvailability() const;
     void handleSetHostname();
+    void handleGetZabbix();
+    void handleSetZabbix();
     void handleGetConfig();
     void handleUpsVars();
     void handleSystemStatus();

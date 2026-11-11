@@ -15,6 +15,7 @@
 #include "core/auto_shutdown.h"
 #include "NetBootPlan.h"
 #include "network/mdns_announcer.h"
+#include "network/zabbix_client.h"
 
 USBHostUPS usb_ups;
 ConfigManager config_mgr;
@@ -36,6 +37,9 @@ static const uint32_t AUTO_SHUTDOWN_CHECK_MS = 1000;
 
 // <hostname>.local and _nut._tcp, in builds with ENABLE_MDNS
 static MdnsAnnouncer mdns_announcer;
+
+// UPS readings to Zabbix, as tescom-agent sends them from a Raspberry Pi
+static ZabbixClient zabbix_client;
 static const uint32_t MDNS_CHECK_MS = 2000;
 
 // Runs from the loopTask, as INSTCMD and the Web UI commands. It reads the UPS over USB
@@ -238,6 +242,8 @@ void setup() {
         } else {
             AppLogger::log("INFO", "[MAIN] NUTServer started correctly on port 3493.");
         }
+        zabbix_client.begin(&usb_ups, &network_mgr);
+        web_server.setZabbixClient(&zabbix_client);
     }
 }
 

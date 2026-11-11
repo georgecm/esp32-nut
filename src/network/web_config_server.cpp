@@ -102,6 +102,17 @@ void WebConfigServer::begin(bool isAPMode) {
     server.on("/api/board", HTTP_POST, guarded([this]() { handleSetBoard(); }));
     // Hostname (US-113), on every board; not public in AuthPolicy, so protected by the login
     server.on("/api/network/hostname", HTTP_POST, guarded([this]() { handleSetHostname(); }));
+    // Zabbix sender (docs/tescom-stick.md): not public in AuthPolicy, so protected by the login
+    server.on("/api/zabbix", HTTP_GET, guarded([this]() { handleGetZabbix(); }));
+    server.on("/api/zabbix", HTTP_POST, guarded([this]() { handleSetZabbix(); }));
+    server.on("/api/zabbix/send", HTTP_POST, guarded([this]() {
+        if (!zabbix_client) {
+            server.send(503, "application/json", "{\"error\":\"Zabbix not available\"}");
+            return;
+        }
+        zabbix_client->sendNow();
+        server.send(202, "application/json", "{\"ok\":true}");
+    }));
     server.on("/api/logs", HTTP_GET, guarded([this]() { handleLogs(); }));
     server.on("/api/config", HTTP_GET, guarded([this]() { handleGetConfig(); }));
     server.on("/api/ups-vars", HTTP_GET, guarded([this]() { handleUpsVars(); }));
@@ -231,6 +242,55 @@ AutoShutdownAvailability WebConfigServer::autoShutdownAvailability() const {
     // The catalog is read only with the UPS connected
     bool has_command = connected && AutoShutdown::offersShutdownDefault(ups_source->getSupportedCommands());
     return ::autoShutdownAvailability(connected, has_command);
+}
+
+void WebConfigServer::handleGetZabbix() {
+    if (!zabbix_client) {
+        server.send(503, "application/json", "{\"error\":\"Zabbix not available\"}");
+        return;
+    }
+    server.send(200, "application/json", zabbix_client->statusJson());
+}
+
+void WebConfigServer::handleSetZabbix() {
+    if (!requireJson()) return;
+    if (!zabbix_client) {
+        server.send(503, "application/json", "{\"error\":\"Zabbix not available\"}");
+        return;
+    }
+    JsonDocument doc;
+    if (!server.hasArg("plain") || deserializeJson(doc, server.arg("plain"))) {
+        server.send(400, "application/json", "{\"error\":\"Invalid request\"}");
+        return;
+    }
+    Zabbix::Settings next = zabbix_client->settings();
+    if (doc["enabled"].is<bool>()) next.enabled = doc["enabled"].as<bool>();
+    if (doc["server"].is<const char*>()) next.server = String(doc["server"].as<const char*>()).c_str();
+    if (doc["host"].is<const char*>()) next.host = doc["host"].as<const char*>();
+    if (doc["port"].is<int>()) {
+        int port = doc["port"].as<int>();
+        next.port = (port > 0 && port <= 65535) ? (uint16_t)port : 0;
+    }
+    if (doc["interval"].is<int>()) {
+        int interval = doc["interval"].as<int>();
+        next.interval_s = (interval > 0 && interval <= 65535) ? (uint16_t)interval : 0;
+    }
+    // Trim the server; a host name is kept as typed (it must match Zabbix exactly)
+    while (!next.server.empty() && next.server.back() == ' ') next.server.pop_back();
+    while (!next.server.empty() && next.server.front() == ' ') next.server.erase(0, 1);
+    if (const char* err = Zabbix::validate(next)) {
+        JsonDocument out;
+        out["error"] = err;
+        String body;
+        serializeJson(out, body);
+        server.send(400, "application/json", body);
+        return;
+    }
+    if (!zabbix_client->save(next)) {
+        server.send(500, "application/json", "{\"error\":\"Failed to save settings\"}");
+        return;
+    }
+    server.send(200, "application/json", zabbix_client->statusJson());
 }
 
 void WebConfigServer::handleGetBoard() {

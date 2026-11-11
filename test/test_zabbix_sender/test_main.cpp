@@ -150,8 +150,33 @@ void test_backlog_drops_the_oldest(void) {
     TEST_ASSERT_EQUAL_UINT(3, b.size());
     TEST_ASSERT_EQUAL_UINT(1, b.dropped());
     TEST_ASSERT_EQUAL_STRING("2", b.items().front().value.c_str());
-    b.clear();
+    b.popFront(2);
+    TEST_ASSERT_EQUAL_UINT(1, b.size());
+    TEST_ASSERT_EQUAL_STRING("4", b.items().front().value.c_str());
+    b.popFront(5);
     TEST_ASSERT_EQUAL_UINT(0, b.size());
+}
+
+void test_settings_validation(void) {
+    Zabbix::Settings s;
+    TEST_ASSERT_NULL(Zabbix::validate(s)); // disabled and empty is fine
+    s.enabled = true;
+    TEST_ASSERT_EQUAL_STRING("server: required", Zabbix::validate(s));
+    s.server = "zabbix.tescom.gr";
+    TEST_ASSERT_EQUAL_STRING("host: required", Zabbix::validate(s));
+    s.host = "Shop UPS_1.leo-2";
+    TEST_ASSERT_NULL(Zabbix::validate(s));
+    s.host = "bad/host";
+    TEST_ASSERT_NOT_NULL(Zabbix::validate(s));
+    s.host = "ok";
+    s.server = "has space";
+    TEST_ASSERT_NOT_NULL(Zabbix::validate(s));
+    s.server = "10.0.0.5";
+    s.interval_s = 1;
+    TEST_ASSERT_NOT_NULL(Zabbix::validate(s));
+    s.interval_s = 30;
+    s.port = 0;
+    TEST_ASSERT_NOT_NULL(Zabbix::validate(s));
 }
 
 int main(int argc, char** argv) {
@@ -164,5 +189,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_request_and_frame);
     RUN_TEST(test_reply);
     RUN_TEST(test_backlog_drops_the_oldest);
+    RUN_TEST(test_settings_validation);
     return UNITY_END();
 }

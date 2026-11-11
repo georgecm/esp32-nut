@@ -71,21 +71,42 @@ bool parseReply(const uint8_t* data, size_t len, Outcome& out);
 // How many bytes the reply has in all, once the 13-byte header is in; 0 if not valid
 size_t replyLength(const uint8_t* header, size_t len);
 
+// What the board needs to send: tescom-agent's [zabbix] section
+struct Settings {
+    bool enabled = false;
+    std::string server;        // Zabbix server or proxy that accepts trapper data
+    uint16_t port = 10051;
+    std::string host;          // host name as configured in Zabbix; must match exactly
+    uint16_t interval_s = 10;  // seconds between readings sent (the agent polls every 10 s)
+};
+
+/**
+ * @brief Checks settings before they are saved. A disabled configuration may be empty,
+ * an enabled one needs a server and a host.
+ *
+ * @return nullptr when valid, otherwise the field at fault and why
+ */
+const char* validate(const Settings& s);
+
 /**
  * @brief Values waiting while Zabbix cannot be reached (the agent's backlog): the oldest
  * go first when it is full.
  */
 class Backlog {
 public:
-    explicit Backlog(size_t max_items = 2000) : _max(max_items) {}
+    explicit Backlog(size_t max_items = 2000) : _capacity(max_items) {}
     void add(const std::vector<Item>& items);
     const std::deque<Item>& items() const { return _items; }
     size_t size() const { return _items.size(); }
     size_t dropped() const { return _dropped; }
     void clear() { _items.clear(); }
+    // Removes the n oldest values (those just sent)
+    void popFront(size_t n) {
+        while (n-- && !_items.empty()) _items.pop_front();
+    }
 
 private:
-    size_t _max;
+    size_t _capacity;
     size_t _dropped = 0;
     std::deque<Item> _items;
 };
