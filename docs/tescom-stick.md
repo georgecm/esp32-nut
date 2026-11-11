@@ -21,7 +21,8 @@ Status: 2026-11-11. Nothing here has run against a real UPS yet.
 | `esp32-s3-n16r8` env (16MB flash, octal PSRAM) | `platformio.ini` | Builds; not flashed yet |
 | `tescom-stick` env: board profile, hostname `tescom-stick-xxxxxx`, NUT description `Tescom stick (<model>)`, mDNS `_nut._tcp` with model TXT | `src/board/tescom_stick.cpp`, `src/network/mdns_announcer.*` | Builds; not flashed yet |
 | Zabbix sender: the "Tescom UPS by NUT" items over the trapper protocol, backlog while unreachable, SNTP time, settings page | `lib/ZabbixSender`, `src/network/zabbix_client.cpp`, NUT Server page | Native tests; builds; not yet sent to a real Zabbix |
-| Adding the stick in Tescom Connect: own key + CSR, code or box QR (factory secret), poll, credentials in NVS, heartbeat turning Zabbix on once the UPS is added and on a plan, Zabbix over TLS with the stick's certificate, banner in the web UI, `GET /api/claim` | `lib/StickCloud`, `src/network/cloud_client.cpp`, `stick_identity.cpp`, `scripts/stick_qr.py`; cloud and web app in nut-app branch `feature/stick-claim` (`/v1/stick/*`, `/v1/sticks/*`, `StickPage.tsx`) | Native tests; cloud end to end on the local Worker (`scripts/stick-claim.mjs`); web app clicked through locally (code and QR); firmware builds, not run on the board yet |
+| Adding the stick in Tescom Connect: own key + CSR, code or box QR (factory secret), poll, credentials in NVS, heartbeat turning Zabbix on once the UPS is added and on a plan, Zabbix over TLS with the stick's certificate, banner in the web UI, `GET /api/claim`, the code on the setup page before the setup network closes | `lib/StickCloud`, `lib/NetCore/src/SetupHold.h`, `src/network/cloud_client.cpp`, `stick_identity.cpp`, `scripts/stick_qr.py`; cloud and web app in nut-app branch `feature/stick-claim` (`/v1/stick/*`, `/v1/sticks/*`, `StickPage.tsx`) | Native tests; cloud end to end on the local Worker (`scripts/stick-claim.mjs`); web app clicked through locally (code and QR); firmware builds, not run on the board yet |
+| Factory flashing: MAC, secret, `factory` NVS partition, one image, sticker SVG, factory list | `scripts/factory_flash.py` | `--dry-run` only (image, NVS and sticker checked; the QR code decodes); never flashed |
 | Native tests on macOS/Linux (`native-host` env) | `platformio.ini` | 875 of 878 pass on the Mac; `test_nut_table`, `test_rw_catalog` (clang `bind` ambiguity) and `test_record_replay` (float rounding) fail on the base commit too |
 
 Building: PlatformIO needs Python 3.10-3.14 (Homebrew's 3.15 is refused), so
@@ -163,18 +164,45 @@ What is built (2026-11-11):
   device, the banner in the web UI (the code, then "Add the UPS" / "Choose a
   plan" with the link), `GET /api/claim` (public on the LAN; approving still
   needs the account), `POST /api/claim/unlink` (login).
+- **Setup page** (tescom-stick env): saving the Wi-Fi on the setup network no
+  longer restarts at once. The stick joins the Wi-Fi with the access point
+  still up (AP+STA), starts the claim, and the page polls `GET /api/claim`
+  every 2 s: "Joining <SSID>", then the code with a big "Add it in Tescom
+  Connect" link to `verifyUrl`, the note that the link loads once the phone is
+  back on its usual Wi-Fi, and "Or scan the QR code on the stick's box". A
+  stick the cloud approved at once (its QR code was scanned before) shows
+  "Already in your Tescom Connect account" with `manageUrl`. The setup network
+  closes and the stick restarts on the Wi-Fi 20 s after the page first read
+  that answer, or 60 s after saving, whichever comes first (`SetupHold`,
+  native tests; `setupS` in `/api/claim` says how long at most). The shown
+  code goes across that restart in RTC memory (`Flow::pending`/`resume`), so
+  the stick keeps polling the same code: a new `start` would replace it in
+  the cloud and the code on the phone would stop working.
+  Limits, to check on the board: the S3 has one radio, so when the router is
+  on another channel the AP moves to it as the station joins and the phone
+  drops off the setup network for a moment (it usually rejoins; the page keeps
+  polling). On iPhones the captive-portal sheet may close when the setup
+  network goes away; the page says to note the code, and the code also stays
+  in the stick's web UI and in the desktop app's reach once it is on the LAN.
+  A wrong Wi-Fi password: after 60 s the stick restarts as before and keeps
+  trying; pressing reset twice opens the setup network again.
 - **Factory**: `scripts/stick_qr.py MAC` gives the secret, the QR link and an
-  NVS CSV for the `factory` namespace.
+  NVS CSV for the `factory` namespace; `scripts/factory_flash.py` flashes a
+  stick with it and writes its sticker (section 7).
+- **The factory secret survives a reset.** Checked 2026-11-11: nothing in the
+  firmware erases NVS as a whole (no `nvs_flash_erase`, no reset endpoint);
+  Unlink clears only the `cloud` namespace, and `factory` is only ever opened
+  read-only (`CloudClient::factorySecret`). Only erasing the flash from a
+  computer (`esptool erase-flash`, `pio run -t erase`) or running
+  `factory_flash.py` again removes it. A future "factory reset" must clear the
+  other namespaces by name (`nutos`, `web_auth`, `cloud`, `stick`, `zabbix`, `board`, `net`, `nutrw`, `boot_state`) and keep
+  `factory`.
 
 Not built yet:
 
-- the setup page showing the code before the setup network closes (the code
-  shows in the stick's web UI and on `GET /api/claim` once it is on Wi-Fi);
 - the desktop app's "Add a stick": find sticks on the LAN, read `/api/claim`,
   approve in one click; and a list of the account's sticks there (today the
   QR code or the stick's own link reopens one to add its UPS later);
-- printing the sticker (the URL is there; `qrencode` makes the image) and
-  writing the NVS CSV in the factory flashing script;
 - deployment: migration 0009, the Connect Worker, `STICK_QR_KEY` (staging and
   production; keep it secret: it makes every stick's QR code).
 
@@ -237,14 +265,43 @@ have one status LED.
 
 ### 7. Production flashing
 
-A `scripts/factory_flash.py` for the line:
+`scripts/factory_flash.py` (built 2026-11-11, tried with `--dry-run` only), for
+one stick on the UART port:
 
-1. read the MAC with esptool, derive `XXXX`;
-2. generate the per-unit secret, build the `factory` NVS image
-   (`nvs_partition_gen.py`), flash `firmware.factory.bin` and it;
-3. watch the UART log until the AP is up, then record MAC, serial, firmware
-   version and the secret's hash in a CSV for the factory list;
-4. print the label (SSID, password, QR code, serial).
+1. reads the MAC (`python -m esptool --chip esp32s3 --port P read-mac`, the
+   esptool of `~/.platformio/penv`), or takes `--mac`;
+2. makes the secret and QR link (`stick_qr.py`), builds the NVS partition with
+   only `factory`/`qr` (`python -m esp_idf_nvs_partition_gen generate`, at the
+   size of the `nvs` partition in the env's table, `partitions.csv`);
+3. puts it into `.pio/build/tescom-stick/firmware.factory.bin` at the `nvs`
+   offset (0x9000; blank in the merged image) and writes that one image at
+   0x0 with `write-flash --erase-all` (two writes would overlap);
+4. writes `factory-out/<MAC>/sticker.svg` (40 x 25 mm: QR code, "Tescom
+   Connect", the MAC's last 6 hex digits; QR from `segno`, `qrcode` or
+   `qrencode`, the URL as text when none is there) and `nvs.csv`/`nvs.bin`, and
+   adds a line to `factory-out/factory_list.csv` (time, MAC, label, SHA-256 of
+   the secret and of the firmware, flashed or dry run). `factory-out/` is in
+   `.gitignore`.
+
+```bash
+~/.platformio-venv/bin/pio run -e tescom-stick
+~/.platformio/penv/bin/pip install esp-idf-nvs-partition-gen   # once; plus segno for the QR code
+STICK_QR_KEY=... ~/.platformio/penv/bin/python scripts/factory_flash.py --port /dev/cu.usbserial-0001
+STICK_QR_KEY=... ~/.platformio/penv/bin/python scripts/factory_flash.py --mac 14:c1:9f:2c:49:c0 --dry-run
+```
+
+The key: `STICK_QR_KEY` (environment) or `--key-file`, never an argument. It
+must be the same value as the cloud's secret, or every QR code and every
+stick's own secret is refused. The operator sets it once per cloud with
+`npx wrangler secret put STICK_QR_KEY` in `nut-app/cloud` (staging and
+production, the same value if the same sticks go to both) and keeps a copy in
+the password manager for the factory; it cannot be read back from Cloudflare.
+Anyone with the key can make a valid QR code for any MAC, so it stays off the
+repo and off shared machines.
+
+Still to do: watch the UART log until the AP is up; the per-unit setup-network
+password and its Wi-Fi QR code on the label (below); the UPS-style serial
+number.
 
 The serial number joins the factory list the cloud already checks
 (`nut-app/docs/ACTIVATION.md`), so a stick can be activated like a UPS.
@@ -280,11 +337,12 @@ The serial number joins the factory list the cloud already checks
 3. ~~Zabbix sender, plain TCP~~ (done).
 4. Claim flow: ~~cloud endpoints, Add a stick in Tescom Connect (code and box
    QR), the UPS by serial, firmware key/CSR + claim client + Zabbix from the
-   heartbeat + TLS + web UI banner, factory secret script~~ (done, not on
-   hardware); left: code on the setup page, desktop app "Add a stick", deploy.
+   heartbeat + TLS + web UI banner, factory secret script, code on the setup
+   page~~ (done, not on hardware); left: desktop app "Add a stick", deploy.
 5. Per-unit AP and login from a `factory` NVS partition, with a fallback for
    dev boards that have none.
 6. Signed OTA (app-level).
-7. Factory flashing script and label.
+7. ~~Factory flashing script and label~~ (done, dry run only); left: UART
+   check, per-unit setup password on the label.
 8. Prime: CH34x VCP host source and Modbus port of `tescom_prime.c`.
 9. LiON RT `krauler` mode.
