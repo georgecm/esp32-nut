@@ -80,55 +80,81 @@ running `tescom-agent`) still shows up in Zabbix.
 - Settings: NUT Server page of the web UI, or `GET/POST /api/zabbix`
   (`enabled`, `server`, `port`, `host`, `interval`), `POST /api/zabbix/send`.
   A build can preset the server: `-DZABBIX_DEFAULT_SERVER=\"...\"`.
-- Not yet: TLS. Plain TCP is fine on a LAN or VPN, not over the internet.
-  `tescom-agent` uses certificates; on the ESP32, Zabbix's PSK mode is the
-  lighter option (mbedTLS has the PSK cipher suites rustls lacks). Also not
-  yet: getting the settings from the Connect cloud's registration, as
-  `tescom-agent register` does (the cloud creates the Zabbix host there).
+- Not yet: TLS. zabbix.metagr.id hosts made by the cloud accept certificate
+  connections only, so the plain-TCP sender is for a local test Zabbix until
+  the claim flow (above) gives the stick its certificate and settings.
 
 ## Plug-and-play pieces
 
-### 1. Wi-Fi provisioning
+### 1-2. Setup: Wi-Fi, then sign in to claim the stick
 
-Today the firmware opens the access point `NUT_ESP32_Config` with the shared
-password `12345678`, and a web page sets the Wi-Fi. That is fine for a
-developer, not for a box sold to customers.
+Decided 2026-11-11: the customer plugs the stick in, gives it the Wi-Fi from
+a setup network, then signs in with their account (Tescom Connect; Metagrid
+to be confirmed) to make the stick theirs. Until then the stick talks to the
+cloud without credentials, and only to ask to be claimed. This is the OAuth
+device authorization flow (RFC 8628, what TVs use), on top of what
+`tescom-agent register` does today.
 
-Options:
+```
+ Customer phone/PC          Stick                         Cloud (connect.tescom.gr)        Zabbix (zabbix.metagr.id)
+ ─────────────────          ─────                         ─────────────────────────        ─────────────────────────
+                            1. AP "Tescom-XXXX"
+ 2. join AP, captive page ─▶ save Wi-Fi
+                            3. joins Wi-Fi, makes key pair + CSR
+                            4. POST /v1/stick/claim/start ─▶ {userCode, verifyUrl,
+                               (serial, MAC, model, CSR)       pollToken, expiresIn}
+ 5. sees code + link + QR ◀─ setup page / web UI /
+    (or the app reads it      GET /api/claim on the LAN
+    from the stick)
+ 6. opens verifyUrl, signs in, picks site/name ─────────────▶ approves: device row, Zabbix host
+                                                              with the stick's cert subject,
+                                                              signs the CSR
+                            7. POST /v1/stick/claim/poll ──▶ {deviceId, agentToken,
+                               every 5 s until approved        zabbix {server, port, host},
+                                                               tls {ca, serverCa, cert}}
+                            8. saves to NVS; Zabbix over TLS with its certificate ─────────▶ readings
+                            9. heartbeat with agentToken ──▶ (live mode, diagnostics, events)
+```
 
-- **A. Per-unit access point, credentials on a label.** SSID `Tescom-XXXX`
-  (last four hex digits of the MAC), a random WPA2 password generated at the
-  factory and printed on the stick with a Wi-Fi QR code
-  (`WIFI:S:Tescom-XXXX;T:WPA;P:...;;`). The customer scans it with a phone,
-  a captive portal opens the existing Wi-Fi page. Works with any phone or
-  laptop, no app change, reuses the AP code that exists.
-- **B. BLE provisioning from the app.** ESP-IDF `wifi_provisioning` over BLE
-  with Security 1 and a proof-of-possession code on the label. Smoother when
-  the app is on a phone, but nut-app is a desktop Tauri app today (BLE on
-  desktop needs `btleplug` and OS permissions), the Arduino core ships BLE
-  but the provisioning manager costs flash and RAM, and it still needs the
-  label for the PoP.
-- C. WPS button. Many routers have it disabled; no.
+How the code reaches the person, most convenient first:
 
-**Recommendation: A now, B when the app has a mobile version.** Both need the
-same per-unit secret on a label, so the factory step is shared.
+1. **The Tescom Connect app** already signed in on a computer on the same
+   network finds the stick (port 3493 scan or mDNS), reads the pending code
+   from the stick's `GET /api/claim`, and approves it with the user's session:
+   no code to type.
+2. **The setup page**: after the Wi-Fi is saved, the page waits on the setup
+   network (AP and Wi-Fi run together for a minute) until the cloud gave a
+   code, then shows a "Sign in to finish" link and the code. The link loads
+   once the phone is back on its usual network.
+3. **The stick's web UI** (`tescom-stick-xxxxxx.local`) shows the code until
+   the stick is claimed.
 
-### 2. Per-unit secrets and login
+Rules for the unauthenticated endpoints: the code is short-lived (15 min,
+renewed by the stick), 8 characters without look-alikes, rate-limited per IP
+and per serial; `start` gives nothing but the code; `poll` gives credentials
+only once, to the holder of `pollToken`. A claimed stick that is reset goes
+through the flow again; the cloud then replaces its certificate.
 
-One random secret per unit, made at the factory, never derived from the MAC
-(the MAC is broadcast):
+What changes where:
 
-- the access-point password;
-- the first web UI password (user `admin`), instead of trust-on-first-use,
-  which on an open AP lets whoever connects first take the stick;
-- the NUT control user (`tescom-connect`, as the Pi's `nut-profile` makes)
-  for instant commands. The app asks for the label code once when adding a
-  stick, or later gets it through the cloud as it does for a Pi.
+- **Cloud (nut-app/cloud)**: `claim/start`, `claim/poll`, an approval page
+  and `POST /v1/stick/claims/:code/approve` for the app. Approval reuses
+  `/agent/register`'s steps (site, device row, Zabbix host, CA signs the CSR,
+  agent token).
+- **Firmware**: key pair and CSR with mbedTLS (key stays in NVS, never
+  leaves), the claim client, TLS with the client certificate in the Zabbix
+  sender (the cloud makes hosts that accept certificate connections only:
+  `tls_accept = 4`), the heartbeat, the code on the setup page and web UI.
+- **App**: "Add a stick" that reads `/api/claim` and approves.
 
-Stored in a separate read-only NVS partition (`factory`), so "reset to
-defaults" and a double-reset AP recovery go back to the label values instead
-of to no password. Flash encryption would protect it against someone holding
-the board; see section 5 for why that waits.
+### Per-unit secrets on the label
+
+Still needed for the setup network: SSID `Tescom-XXXX` (last four hex digits
+of the MAC) and a random WPA2 password generated at the factory, printed with
+a Wi-Fi QR code (`WIFI:S:Tescom-XXXX;T:WPA;P:...;;`). The same secret is the
+first web UI password (instead of trust-on-first-use, which on an open setup
+network lets whoever connects first take the stick). Stored in a read-only
+`factory` NVS partition so a reset goes back to the label values.
 
 ### 3. Naming: mDNS and what the app shows
 
@@ -219,9 +245,12 @@ The serial number joins the factory list the cloud already checks
 
 1. ~~Profiles export and model detection~~ (done).
 2. ~~Board profile + env `tescom-stick`, mDNS with the NUT service and the model~~ (done).
-3. Per-unit AP and login from a `factory` NVS partition, with a fallback for
+3. ~~Zabbix sender, plain TCP~~ (done).
+4. Claim flow: cloud endpoints, firmware key/CSR + claim client + Zabbix TLS
+   with the certificate + heartbeat, app "Add a stick".
+5. Per-unit AP and login from a `factory` NVS partition, with a fallback for
    dev boards that have none.
-4. Signed OTA (app-level).
-5. Factory flashing script and label.
-6. Prime: CH34x VCP host source and Modbus port of `tescom_prime.c`.
-7. LiON RT `krauler` mode.
+6. Signed OTA (app-level).
+7. Factory flashing script and label.
+8. Prime: CH34x VCP host source and Modbus port of `tescom_prime.c`.
+9. LiON RT `krauler` mode.
