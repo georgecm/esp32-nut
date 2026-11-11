@@ -8,8 +8,10 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_attr.h>
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
+#include <string.h>
 #include <time.h>
 
 #ifndef CLOUD_URL
@@ -31,6 +33,29 @@ const uint32_t HEARTBEAT_MS = 30000;
 const int HTTP_TIMEOUT_MS = 15000;
 // Answers are small JSON; the claim's credentials are the largest (two PEMs, a JWT)
 const size_t MAX_BODY = 16 * 1024;
+
+// The code shown on the setup page, across the restart that closes the setup network
+// (survives esp_restart(), not a power cycle; the cloud's code lasts 15 min anyway)
+#define SETUP_CODE_MAGIC 0x53434F44u // "SCOD"
+struct SetupCode {
+    uint32_t magic;
+    char user_code[24];
+    char verify_url[160];
+    char poll_token[96];
+    uint32_t expires_in_s;
+    uint32_t interval_s;
+};
+RTC_NOINIT_ATTR SetupCode s_setup_code;
+
+bool copyField(char* dst, size_t size, const std::string& v) {
+    if (v.size() >= size) return false;
+    memcpy(dst, v.c_str(), v.size() + 1);
+    return true;
+}
+
+std::string fieldOf(const char* v, size_t size) {
+    return std::string(v, strnlen(v, size));
+}
 
 class Guard {
 public:
@@ -90,6 +115,7 @@ int httpsPost(const String& url, const std::string& body, const std::string& bea
 } // namespace
 
 void CloudClient::begin(USBHostUPS* ups, AppNetworkManager* net, ZabbixClient* zabbix) {
+    if (_mutex) return;
     _ups = ups;
     _net = net;
     _zabbix = zabbix;
@@ -99,9 +125,19 @@ void CloudClient::begin(USBHostUPS* ups, AppNetworkManager* net, ZabbixClient* z
         _flow.restore(c);
         applyCredentials(c);
         AppLogger::log("INFO", "[CLOUD] Linked to Tescom Connect as \"%s\" (%s)", c.name.c_str(), c.organization.c_str());
+    } else if (s_setup_code.magic == SETUP_CODE_MAGIC) {
+        StickClaim::PendingCode p;
+        p.user_code = fieldOf(s_setup_code.user_code, sizeof(s_setup_code.user_code));
+        p.verify_url = fieldOf(s_setup_code.verify_url, sizeof(s_setup_code.verify_url));
+        p.poll_token = fieldOf(s_setup_code.poll_token, sizeof(s_setup_code.poll_token));
+        p.expires_in_s = s_setup_code.expires_in_s;
+        p.interval_s = s_setup_code.interval_s;
+        if (_flow.resume(p, millis()))
+            AppLogger::log("INFO", "[CLOUD] Code %s from the setup page: still waiting for its approval", p.user_code.c_str());
     } else {
         AppLogger::log("INFO", "[CLOUD] Not linked to Tescom Connect yet: a code is asked for once on Wi-Fi");
     }
+    s_setup_code.magic = 0;  // used once
     xTaskCreatePinnedToCore(taskEntry, "cloud", 8192, this, 1, nullptr, 0);
 }
 
@@ -111,6 +147,34 @@ String CloudClient::mac() const {
     char buf[18];
     snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5]);
     return buf;
+}
+
+bool CloudClient::connected() const {
+    return (_net && _net->isConnected()) || WiFi.status() == WL_CONNECTED;
+}
+
+bool CloudClient::hasAnswer() const {
+    if (!_mutex) return false;
+    Guard g(_mutex);
+    return _flow.state() == StickClaim::State::CLAIMED ||
+           (_flow.state() == StickClaim::State::PENDING && !_flow.preApproved());
+}
+
+void CloudClient::keepCodeForRestart() {
+    s_setup_code.magic = 0;
+    if (!_mutex) return;
+    StickClaim::PendingCode p;
+    {
+        Guard g(_mutex);
+        if (!_flow.pending(p, millis())) return;
+    }
+    if (!copyField(s_setup_code.user_code, sizeof(s_setup_code.user_code), p.user_code) ||
+        !copyField(s_setup_code.verify_url, sizeof(s_setup_code.verify_url), p.verify_url) ||
+        !copyField(s_setup_code.poll_token, sizeof(s_setup_code.poll_token), p.poll_token))
+        return;
+    s_setup_code.expires_in_s = p.expires_in_s;
+    s_setup_code.interval_s = p.interval_s;
+    s_setup_code.magic = SETUP_CODE_MAGIC;
 }
 
 String CloudClient::statusJson() const {
@@ -140,7 +204,7 @@ String CloudClient::statusJson() const {
         } else if (_flow.lastError().size()) {
             doc["lastError"] = _flow.lastError();
         }
-        doc["connected"] = _net && _net->isConnected();
+        doc["connected"] = connected();
     }
     String out;
     serializeJson(doc, out);
@@ -168,7 +232,7 @@ void CloudClient::run() {
             _heartbeat_error = "";
             AppLogger::log("INFO", "[CLOUD] Unlinked: a new code will be asked for");
         }
-        if (!_net || !_net->isConnected()) continue;
+        if (!connected()) continue;
         if (!_started_at_ms) {
             time_t t = time(nullptr);
             if (t > 1700000000) _started_at_ms = (uint64_t)t * 1000 - millis();

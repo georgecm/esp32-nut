@@ -193,6 +193,10 @@ void setup() {
                            (unsigned)(ApIdleTimeout::DEFAULT_TIMEOUT_MS / 60000));
         }
         web_server.setUPS(&usb_ups);
+#ifdef ENABLE_CLOUD_CLAIM
+        // Saving the Wi-Fi shows the Tescom Connect code before the setup network closes
+        web_server.setSetupCloud(&cloud_client);
+#endif
         web_server.begin(true);
     } else {
         is_ap_mode = false;

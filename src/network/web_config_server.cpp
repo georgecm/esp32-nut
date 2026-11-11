@@ -9,6 +9,8 @@
 #include "core/app_logger.h"
 #include "core/crash_diag.h"
 #include "network/web_assets.h"
+#include "network/tls_gate.h"
+#include <WiFi.h>
 #include <Update.h>
 #include "esp_task_wdt.h"
 
@@ -112,7 +114,15 @@ void WebConfigServer::begin(bool isAPMode) {
             return;
         }
         server.sendHeader("Cache-Control", "no-store");
-        server.send(200, "application/json", cloud_client->statusJson());
+        String body = cloud_client->statusJson();
+        if (setup_hold.active()) {
+            // The setup page read the code (or "already in an account"): the setup network
+            // closes a little later. setupS: at most how long it stays up
+            if (cloud_client->hasAnswer()) setup_hold.answerSeen(millis());
+            body.remove(body.length() - 1);
+            body += ",\"setupS\":" + String(setup_hold.leftS(millis())) + "}";
+        }
+        server.send(200, "application/json", body);
     }));
     server.on("/api/claim/unlink", HTTP_POST, guarded([this]() {
         if (!cloud_client) {
@@ -221,6 +231,14 @@ void WebConfigServer::loop() {
 
     if (recovery.update(millis()) == RecoveryWindow::Event::EXPIRED) {
         AppLogger::log("INFO", "[AUTH] Recovery window closed: expired, the current credentials stay valid");
+    }
+
+    if (setup_hold.update(millis())) {
+        // The next boot polls the same code: a new start would replace the one on the page
+        if (setup_cloud) setup_cloud->keepCodeForRestart();
+        AppLogger::log("INFO", "[WEB] Setup network closing: restarting on the Wi-Fi");
+        should_restart = true;
+        restart_request_time = millis();
     }
 
     if (should_restart && (millis() - restart_request_time >= 1000)) {
@@ -432,6 +450,15 @@ void WebConfigServer::handleConnect() {
 
     config_mgr.setWifiConfig(wc);
     if (config_mgr.save()) {
+        if (is_ap_mode && setup_cloud && board().has_wifi) {
+            // Tescom stick: stay on the setup network while joining the Wi-Fi, so the page
+            // can show the Tescom Connect code; the restart follows (SetupHold)
+            server.send(200, "application/json",
+                        String("{\"success\":true,\"restart\":false,\"setup\":{\"holdS\":") +
+                            (setup_hold.maxMs() / 1000) + "}}");
+            startSetupHold(ssid, pwd);
+            return;
+        }
         server.send(200, "application/json", "{\"success\": true}");
         
         // Asynchronous restart
@@ -440,6 +467,20 @@ void WebConfigServer::handleConnect() {
     } else {
         server.send(500, "application/json", "{\"error\": \"Failed to save config\"}");
     }
+}
+
+void WebConfigServer::startSetupHold(const String& ssid, const String& password) {
+    AppLogger::log("INFO", "[WEB] Wi-Fi saved: joining %s with the setup network still up (at most %u s)",
+                   ssid.c_str(), (unsigned)(setup_hold.maxMs() / 1000));
+    // The access point stays; if the router is on another channel the AP moves to it
+    // when the station joins (one radio), and the phone rejoins the setup network
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.disconnect();
+    WiFi.begin(ssid.c_str(), password.c_str());
+    TlsGate::init();
+    setup_cloud->begin(usb_ups, network, nullptr);
+    cloud_client = setup_cloud;
+    setup_hold.start(millis());
 }
 
 void WebConfigServer::handleLogs() {

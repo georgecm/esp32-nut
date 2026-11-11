@@ -26,11 +26,18 @@ class ZabbixClient;
  */
 class CloudClient {
 public:
+    // Once: a second call (the setup page started it already) does nothing
     void begin(USBHostUPS* ups, AppNetworkManager* net, ZabbixClient* zabbix);
+    bool started() const { return _mutex != nullptr; }
     // The claim as JSON for GET /api/claim
     String statusJson() const;
     // Forget the claim and ask for a new code (the owner's "Unlink" in the web UI)
     void unlink();
+    // Something to show on the setup page: a code, or already in an account
+    bool hasAnswer() const;
+    // Keep the shown code in RTC memory for the restart that ends the setup network, so the
+    // next boot polls the same code instead of asking for a new one (which would replace it)
+    void keepCodeForRestart();
 
 private:
     static void taskEntry(void* arg);
@@ -44,6 +51,8 @@ private:
     // The factory secret (NVS "factory"/"qr"), empty when this stick has none
     static std::string factorySecret();
     String mac() const;
+    // On a Wi-Fi with an address: the active link, or the station next to the setup network
+    bool connected() const;
 
     USBHostUPS* _ups = nullptr;
     AppNetworkManager* _net = nullptr;

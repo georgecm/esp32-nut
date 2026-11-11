@@ -14,6 +14,7 @@
 #include "network/zabbix_client.h"
 #include "network/cloud_client.h"
 #include "SessionTable.h"
+#include "SetupHold.h"
 #include "RecoveryWindow.h"
 #include "DiagnosticLED.h"
 #include "core/board_settings_store.h"
@@ -42,6 +43,10 @@ public:
     void setHostnameStore(HostnameStore* store, const String& saved);
     void setZabbixClient(ZabbixClient* client) { zabbix_client = client; }
     void setCloudClient(CloudClient* client) { cloud_client = client; }
+    // Setup network only (docs/tescom-stick.md, "Setup"): saving the Wi-Fi keeps the access
+    // point up next to the station for a while and starts this client, so the setup page
+    // shows the Tescom Connect code before the board restarts on the Wi-Fi
+    void setSetupCloud(CloudClient* client) { setup_cloud = client; }
 
 private:
     WebServer server;
@@ -67,9 +72,13 @@ private:
     HostnameStore* hostname_store = nullptr;
     ZabbixClient* zabbix_client = nullptr;
     CloudClient* cloud_client = nullptr;
+    CloudClient* setup_cloud = nullptr;
+    SetupHold setup_hold;
     String saved_hostname;
 
     void handleConnect();
+    // AP+STA after the Wi-Fi was saved on the setup network, then the restart (SetupHold)
+    void startSetupHold(const String& ssid, const String& password);
     void handleLogs();
     void handleNutConfig();
     void handleGetBoard();
