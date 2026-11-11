@@ -2616,4 +2616,114 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     bindLogout(btnLogout, '/api/auth/logout');
     bindLogout(btnLogoutAll, '/api/auth/logout-all');
+
+    // Zabbix sender (docs/tescom-stick.md): settings and send state, read when the NUT tab
+    // opens and every 5 s while it is shown
+    const zbxForm = document.getElementById('zabbix-form');
+    if (zbxForm) {
+        const Z = id => document.getElementById(id);
+        let zbxTimer = null;
+        let zbxLoaded = false;
+
+        function zbxShowError(text) {
+            Z('zbx-error-text').textContent = text;
+            Z('zbx-error').hidden = !text;
+        }
+
+        function zbxAgo(s) {
+            if (s < 60) return s + ' s ago';
+            if (s < 3600) return Math.floor(s / 60) + ' min ago';
+            return Math.floor(s / 3600) + ' h ago';
+        }
+
+        function zbxRender(d, fillForm) {
+            if (fillForm) {
+                Z('zbx-enabled').checked = !!d.enabled;
+                Z('zbx-server').value = d.server || '';
+                Z('zbx-port').value = d.port || 10051;
+                Z('zbx-host').value = d.host || '';
+                Z('zbx-interval').value = d.interval || 10;
+            }
+            const st = d.status || {};
+            const labels = { off: 'Off', waiting: 'Waiting', ok: 'Sending', failing: 'Not reachable' };
+            Z('zbx-state').textContent = labels[st.state] || '--';
+            const parts = [];
+            if (st.lastOkAgoS !== undefined) parts.push('Last sent ' + zbxAgo(st.lastOkAgoS));
+            if (st.lastFailed > 0) parts.push(st.lastFailed + ' of ' + (st.lastProcessed + st.lastFailed) +
+                ' values refused (host or template missing in Zabbix?)');
+            if (st.backlog > 0) parts.push(st.backlog + ' values waiting');
+            if (st.dropped > 0) parts.push(st.dropped + ' dropped while unreachable');
+            if (st.state !== 'off' && !st.timeSynced) parts.push('clock not synced yet: Zabbix stamps the values');
+            if (st.lastError) parts.push('Last error: ' + st.lastError);
+            Z('zbx-status').textContent = parts.length ? parts.join(' · ') : (st.state === 'off' ? 'Not sending.' : '--');
+        }
+
+        async function loadZabbix() {
+            if (sessionExpired) return;
+            try {
+                const res = await apiFetch('/api/zabbix', { cache: 'no-store' });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const d = await res.json();
+                zbxRender(d, !zbxLoaded);
+                zbxLoaded = true;
+                if (!Z('zbx-error').dataset.keep) zbxShowError('');
+            } catch (err) {
+                console.error('Failed to fetch Zabbix settings:', err);
+                zbxShowError('Could not read the Zabbix settings.');
+            }
+        }
+
+        function zbxStartPolling() {
+            loadZabbix();
+            if (!zbxTimer) zbxTimer = setInterval(() => {
+                if (Z('content-nut').classList.contains('active')) loadZabbix();
+            }, 5000);
+        }
+
+        zbxForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const body = {
+                enabled: Z('zbx-enabled').checked,
+                server: Z('zbx-server').value.trim(),
+                port: parseInt(Z('zbx-port').value || '10051', 10),
+                host: Z('zbx-host').value,
+                interval: parseInt(Z('zbx-interval').value || '10', 10),
+            };
+            Z('btn-save-zbx').disabled = true;
+            try {
+                const res = await apiFetch('/api/zabbix', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const d = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    zbxShowError(d.error ? 'Not saved: ' + d.error : 'Not saved (HTTP ' + res.status + ').');
+                } else {
+                    zbxShowError('');
+                    zbxRender(d, true);
+                }
+            } catch (err) {
+                zbxShowError('Not saved: the board did not answer.');
+            } finally {
+                Z('btn-save-zbx').disabled = false;
+            }
+        });
+
+        Z('btn-zbx-send').addEventListener('click', async () => {
+            try {
+                await apiFetch('/api/zabbix/send', { method: 'POST' });
+                setTimeout(loadZabbix, 1500);
+            } catch (err) {
+                zbxShowError('The board did not answer.');
+            }
+        });
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                if (tab.getAttribute('data-target') === 'nut') zbxStartPolling();
+            });
+        });
+        if (activeTab && activeTab.getAttribute('data-target') === 'nut') zbxStartPolling();
+    }
 });

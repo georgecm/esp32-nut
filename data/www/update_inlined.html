@@ -2891,6 +2891,14 @@ body.auth-page {
     .host-current code { font-size: 0.95rem; }
 }
 
+/* Zabbix panel in the NUT tab: two columns, the switch, status and buttons across */
+#zabbix-form { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+#zabbix-form .zbx-toggle, #zabbix-form .zbx-status, #zabbix-form .form-actions { grid-column: 1 / -1; }
+#zabbix-form .zbx-toggle { display: flex; align-items: center; gap: 0.75rem; }
+#zabbix-form .form-actions { display: flex; gap: 0.75rem; justify-content: flex-end; flex-wrap: wrap; }
+#zabbix-form .zbx-status { margin: 0; }
+@media (max-width: 640px) { #zabbix-form { grid-template-columns: 1fr; } }
+
 /* OTA Update Styles */
 .ota-container {
     max-width: 500px;
