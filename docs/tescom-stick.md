@@ -20,6 +20,7 @@ Status: 2026-11-11. Nothing here has run against a real UPS yet.
 | Model detection from the shared profiles | `lib/USBHostUPS/src/UpsProfiles*`, `scripts/gen_profiles.py` | Native tests only |
 | `esp32-s3-n16r8` env (16MB flash, octal PSRAM) | `platformio.ini` | Builds; not flashed yet |
 | `tescom-stick` env: board profile, hostname `tescom-stick-xxxxxx`, NUT description `Tescom stick (<model>)`, mDNS `_nut._tcp` with model TXT | `src/board/tescom_stick.cpp`, `src/network/mdns_announcer.*` | Builds; not flashed yet |
+| Zabbix sender: the "Tescom UPS by NUT" items over the trapper protocol, backlog while unreachable, SNTP time, settings page | `lib/ZabbixSender`, `src/network/zabbix_client.cpp`, NUT Server page | Native tests; builds; not yet sent to a real Zabbix |
 | Native tests on macOS/Linux (`native-host` env) | `platformio.ini` | 875 of 878 pass on the Mac; `test_nut_table`, `test_rw_catalog` (clang `bind` ambiguity) and `test_record_replay` (float rounding) fail on the base commit too |
 
 Building: PlatformIO needs Python 3.10-3.14 (Homebrew's 3.15 is refused), so
@@ -61,6 +62,29 @@ nut-app/profiles/*.conf
   `battery.packs` (the LiON).
 - With no fitting profile, or two, the stick reads the UPS as before, with no
   model name, and logs `[Megatec] no single profile fits`.
+
+## Zabbix
+
+The stick sends to Zabbix itself, so a site with only a stick (no Pi, no PC
+running `tescom-agent`) still shows up in Zabbix.
+
+- Same items, keys and rules as `tescom-agent` (`nut-app/crates/tescom-agent`,
+  `items.rs`): the template `nut-app/zabbix/template_tescom_ups_by_nut.yaml`
+  works unchanged. Only `ups.link` is sent while the UPS link is down or stale,
+  so the template's nodata triggers fire.
+- Zabbix sender (trapper) protocol, plain TCP to port 10051 by default, in its
+  own task. Unreachable server: values wait (1500 on PSRAM boards, 300
+  otherwise, oldest dropped) and go out in batches of 200 when it answers.
+- Time from SNTP (`pool.ntp.org`, `time.google.com`) once synced; until then
+  the values carry no clock and Zabbix stamps them on arrival.
+- Settings: NUT Server page of the web UI, or `GET/POST /api/zabbix`
+  (`enabled`, `server`, `port`, `host`, `interval`), `POST /api/zabbix/send`.
+  A build can preset the server: `-DZABBIX_DEFAULT_SERVER=\"...\"`.
+- Not yet: TLS. Plain TCP is fine on a LAN or VPN, not over the internet.
+  `tescom-agent` uses certificates; on the ESP32, Zabbix's PSK mode is the
+  lighter option (mbedTLS has the PSK cipher suites rustls lacks). Also not
+  yet: getting the settings from the Connect cloud's registration, as
+  `tescom-agent register` does (the cloud creates the Zabbix host there).
 
 ## Plug-and-play pieces
 
@@ -189,6 +213,7 @@ The serial number joins the factory list the cloud already checks
 | CH34x serial host + Modbus for the Prime (not written yet) | Prime 1102 XL |
 | 5 V VBUS from the board's pads under the UPS's load | Any UPS |
 | App finds the stick by its 3493 scan, reads, shows the model | Any UPS + app |
+| Values reach Zabbix and fill the template's items; backlog after a Zabbix outage | Zabbix server + host with the template (a UPS for full readings; without one only `ups.link = driverDown` goes out) |
 
 ## Order of work
 
