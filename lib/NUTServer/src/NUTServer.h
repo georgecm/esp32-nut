@@ -101,6 +101,9 @@ public:
     void setClock(ClockFn now);
     void setRandom(NutTracking::RandomFn rnd);
 
+    // Description of LIST UPS and GET UPSDESC, quoted for the protocol
+    String upsDescription() const;
+
 private:
     void handleCommand(int slot, const String& cmdLine);
     // IP dei client degli slot attivi, in ordine di slot, separati da ", "

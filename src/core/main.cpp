@@ -14,6 +14,7 @@
 #include "core/hostname_store.h"
 #include "core/auto_shutdown.h"
 #include "NetBootPlan.h"
+#include "network/mdns_announcer.h"
 
 USBHostUPS usb_ups;
 ConfigManager config_mgr;
@@ -32,6 +33,10 @@ static HostnameStore hostname_store;
 // shutdown.default once per OB+LB event, option of the Board page (US-114)
 static AutoShutdown auto_shutdown;
 static const uint32_t AUTO_SHUTDOWN_CHECK_MS = 1000;
+
+// <hostname>.local and _nut._tcp, in builds with ENABLE_MDNS
+static MdnsAnnouncer mdns_announcer;
+static const uint32_t MDNS_CHECK_MS = 2000;
 
 // Runs from the loopTask, as INSTCMD and the Web UI commands. It reads the UPS over USB
 // only, so it works without network, in AP mode and with an invalid configuration
@@ -336,6 +341,18 @@ void loop() {
     }
 
     nut_server.loop();
+
+    static uint32_t last_mdns = 0;
+    if (now - last_mdns >= MDNS_CHECK_MS) {
+        last_mdns = now;
+        String mfr, model;
+        {
+            auto data = usb_ups.getUPSData();
+            mfr = data->get("ups.mfr");
+            model = data->get("ups.model");
+        }
+        mdns_announcer.loop(network_mgr.isConnected(), network_mgr.hostname(), mfr, model, NUT_DEFAULT_PORT);
+    }
 
     static uint32_t last_print = 0;
     if (now - last_print >= 5000) {

@@ -71,8 +71,24 @@ static void enableKeepalive(WiFiClient& client) {
 }
 #endif
 
-// Shared by LIST UPS and GET UPSDESC so the two cannot drift.
-static const char* NUT_UPS_DESCRIPTION = "ESP32-S3 UPS Bridge";
+// Shared by LIST UPS and GET UPSDESC so the two cannot drift. A build can name its
+// product (-DNUT_UPS_DESCRIPTION=...), and with -DNUT_UPS_DESCRIPTION_MODEL the model the
+// driver reports is added in brackets: "Tescom stick (Leo LCD)"
+#ifndef NUT_UPS_DESCRIPTION
+#define NUT_UPS_DESCRIPTION "ESP32-S3 UPS Bridge"
+#endif
+
+String NUTServer::upsDescription() const {
+    String desc = NUT_UPS_DESCRIPTION;
+#ifdef NUT_UPS_DESCRIPTION_MODEL
+    if (_usb_ups && _usb_ups->isConnected()) {
+        auto data = _usb_ups->getUPSData();
+        String model = data->get("ups.model");
+        if (model.length() > 0) desc += String(" (") + model + ")";
+    }
+#endif
+    return encodeValue(desc.c_str());
+}
 
 // Injected at build time from the release tag; "dev" for local builds, matching
 // src/network/web_config_server.cpp.
@@ -557,7 +573,7 @@ void NUTServer::processCommand(Print& client, int slot, const String& cmdLine) {
 
         if (subcmd == "UPS") {
             client.print("BEGIN LIST UPS\n");
-            client.printf("UPS %s \"%s\"\n", _config.ups_name.c_str(), NUT_UPS_DESCRIPTION);
+            client.printf("UPS %s \"%s\"\n", _config.ups_name.c_str(), upsDescription().c_str());
             client.print("END LIST UPS\n");
             return;
         } 
@@ -939,7 +955,7 @@ void NUTServer::processCommand(Print& client, int slot, const String& cmdLine) {
             }
 
             if (subcmd == "UPSDESC") {
-                client.printf("UPSDESC %s \"%s\"\n", upsName.c_str(), NUT_UPS_DESCRIPTION);
+                client.printf("UPSDESC %s \"%s\"\n", upsName.c_str(), upsDescription().c_str());
             } else {
                 // This bridge exposes telemetry only; it tracks no upsmon LOGIN
                 // sessions, so the count of logged-in clients is always zero.

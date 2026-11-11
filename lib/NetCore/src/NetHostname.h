@@ -17,6 +17,11 @@
  * Without a valid saved name the board uses esp32-nut-xxxxxx, from the last three bytes
  * of the MAC of the link, in lower case (the Ethernet name before US-113).
  */
+// A product build can name its boards (-DNET_HOSTNAME_PREFIX=\"tescom-stick\")
+#ifndef NET_HOSTNAME_PREFIX
+#define NET_HOSTNAME_PREFIX "esp32-nut"
+#endif
+
 namespace NetHostname {
 
 constexpr size_t kMaxLength = 32;
@@ -37,8 +42,8 @@ inline bool isValid(const char* name) {
 }
 
 inline String defaultFor(const uint8_t mac[6]) {
-    char name[24];
-    snprintf(name, sizeof(name), "esp32-nut-%02x%02x%02x", mac[3], mac[4], mac[5]);
+    char name[kMaxLength + 1];
+    snprintf(name, sizeof(name), NET_HOSTNAME_PREFIX "-%02x%02x%02x", mac[3], mac[4], mac[5]);
     return String(name);
 }
 
