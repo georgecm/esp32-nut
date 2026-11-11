@@ -297,6 +297,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             
             if (!response.ok) throw new Error('Connect failed');
+            // Tescom stick: the setup network stays up a while and the claim banner shows the code
+            let saved = null;
+            try { saved = await response.json(); } catch (_) { saved = null; }
+            const setup = saved && saved.setup;
             
             btnConnect.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Saved & Connecting`;
             btnConnect.style.background = 'var(--success)';
@@ -308,8 +312,12 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelector('.status-indicator').style.background = 'var(--success)';
             document.querySelector('.status-indicator').style.boxShadow = '0 0 8px rgba(0, 255, 157, 0.5)';
             document.querySelector('.status-indicator').style.animation = 'none';
-            document.querySelector('.system-status span').textContent = 'Restarting...';
-            
+            document.querySelector('.system-status span').textContent = setup ? 'Joining Wi-Fi...' : 'Restarting...';
+
+            if (setup) {
+                document.dispatchEvent(new CustomEvent('wifi-setup-saved', { detail: { ssid: ssidInput.value, holdS: setup.holdS || 60 } }));
+                return;
+            }
             setTimeout(() => {
                 alert('Credentials saved! Device will now restart to apply changes.');
             }, 500);
@@ -2742,13 +2750,59 @@ document.addEventListener('DOMContentLoaded', () => {
     if (claimPanel) {
         const C = id => document.getElementById(id);
         let claimTimer = null;
+        // Wi-Fi saved on the setup network (Tescom stick): poll fast until the setup network closes
+        let setup = null;
 
         function claimSchedule(ms) {
             clearTimeout(claimTimer);
             claimTimer = setTimeout(loadClaim, ms);
         }
 
+        // The setup page: the code with a big link, or "already in your account"; the link
+        // loads only once the phone is back on its usual Wi-Fi (the setup network has no internet)
+        function renderSetup(d) {
+            claimPanel.hidden = false;
+            claimPanel.classList.add('claim-setup');
+            const linked = d && d.state === 'claimed';
+            const pending = d && d.state === 'pending' && d.userCode;
+            C('claim-unlink').hidden = true;
+            C('claim-code').hidden = linked;
+            const link = C('claim-link');
+            link.hidden = !(linked ? d.manageUrl : pending && d.verifyUrl);
+            if (!link.hidden) {
+                link.href = linked ? d.manageUrl : d.verifyUrl;
+                link.textContent = linked ? 'Open Tescom Connect' : 'Add it in Tescom Connect';
+            }
+            const note = C('claim-note');
+            note.hidden = !(linked || pending);
+            note.textContent = 'The link loads once this phone is back on its usual Wi-Fi; the setup network closes by itself.'
+                + (pending ? ' Or scan the QR code on the stick\u2019s box.' : '');
+            if (linked) {
+                C('claim-title').textContent = 'Already in your Tescom Connect account';
+                C('claim-lead').textContent = '\u201c' + (d.name || 'This stick') + '\u201d is in ' + (d.organization || 'your account')
+                    + '. ' + (d.next === 'sending' ? 'Its UPS\u2019s readings go to Tescom Connect.' : 'Add the UPS it is plugged into there, by the serial number on its label.');
+            } else if (pending) {
+                C('claim-title').textContent = 'Add this stick to Tescom Connect';
+                C('claim-lead').textContent = 'The stick is on ' + setup.ssid + '. Sign in to Tescom Connect (or create your account) and approve this code:';
+                C('claim-code').textContent = d.userCode;
+            } else {
+                C('claim-title').textContent = 'Joining ' + setup.ssid + '\u2026';
+                C('claim-lead').textContent = d && d.connected ? 'On the Wi-Fi: asking Tescom Connect for this stick\u2019s code\u2026'
+                    : 'The stick is joining your Wi-Fi, then asks Tescom Connect for its code. Stay on this page.';
+                C('claim-code').textContent = '----\u2011----';
+            }
+            if (setup.closed) {
+                C('claim-meta').textContent = linked || pending ? 'The setup network has closed: the stick is restarting on your Wi-Fi.'
+                    : 'The setup network has closed. The stick keeps trying ' + setup.ssid
+                      + '; if the password was wrong, press its reset button twice to open the setup network again.';
+            } else {
+                C('claim-meta').textContent = d && d.setupS !== undefined ? 'Setup network open for up to ' + d.setupS + ' s more.'
+                    : (d && d.lastError ? 'Last error: ' + d.lastError : '');
+            }
+        }
+
         function renderClaim(d) {
+            if (setup) { renderSetup(d || setup.last); return; }
             if (!d || d.state === 'off') { claimPanel.hidden = true; return; }
             claimPanel.hidden = false;
             const linked = d.state === 'claimed';
@@ -2793,9 +2847,24 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 console.error('Failed to fetch the claim state:', err);
             }
+            if (setup) {
+                if (d) setup.last = d;
+                // No answer: the setup network closed (or the AP moved channel; retried until the hold is over)
+                if (!d && (setup.last || Date.now() > setup.until)) setup.closed = true;
+                renderClaim(d);
+                if (!setup.closed) claimSchedule(2000);
+                return;
+            }
             renderClaim(d);
             if (d && d.state !== 'off') claimSchedule(d.state === 'claimed' ? 30000 : 5000);
         }
+
+        document.addEventListener('wifi-setup-saved', (e) => {
+            setup = { ssid: e.detail.ssid, until: Date.now() + (e.detail.holdS + 10) * 1000, last: null, closed: false };
+            renderSetup(null);
+            claimPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            claimSchedule(1500);
+        });
 
         C('claim-unlink').addEventListener('click', async () => {
             if (!confirm('Unlink this stick from Tescom Connect? It stops sending to Zabbix until it is approved again with a new code.')) return;

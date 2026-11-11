@@ -2902,4 +2902,9 @@ body.auth-page {
 .claim-code[hidden] { display: none; }
 .claim-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 1rem; }
 .claim-actions a[hidden], .claim-actions button[hidden] { display: none; }
+/* Setup network (Wi-Fi just saved): the link is the one thing to tap */
+.claim-note { margin: 1rem 0 0; opacity: 0.8; font-size: 0.9rem; }
+.claim-note[hidden] { display: none; }
+.claim-setup .claim-actions .btn-primary { flex: 1 1 100%; justify-content: center; text-align: center; font-size: 1.1rem; padding: 0.9rem 1.2rem; }
+.claim-setup .claim-meta { flex: 1 1 100%; }
 .claim-meta { font-size: 0.85rem; opacity: 0.75; flex: 1; }
