@@ -2755,22 +2755,29 @@ document.addEventListener('DOMContentLoaded', () => {
             C('claim-code').hidden = linked;
             C('claim-unlink').hidden = !linked;
             const link = C('claim-link');
-            link.hidden = !(d.state === 'pending' && d.verifyUrl);
-            if (!link.hidden) link.href = d.verifyUrl;
+            // Pending: approve the code; linked but not sending: finish in Tescom Connect (the UPS's serial, a plan)
+            const finish = linked && d.next && d.next !== 'sending' && d.manageUrl;
+            link.hidden = !((d.state === 'pending' && d.verifyUrl) || finish);
+            if (!link.hidden) {
+                link.href = linked ? d.manageUrl : d.verifyUrl;
+                link.textContent = linked ? (d.next === 'plan' ? 'Choose a plan in Tescom Connect' : 'Add the UPS in Tescom Connect') : 'Open Tescom Connect';
+            }
             if (linked) {
-                C('claim-title').textContent = 'Linked to Tescom Connect';
-                C('claim-lead').textContent = '\u201c' + (d.name || 'This stick') + '\u201d in ' + (d.organization || 'your account') +
-                    '. Its readings go to the account\u2019s Zabbix.';
+                const who = '\u201c' + (d.name || 'This stick') + '\u201d is in ' + (d.organization || 'your Tescom Connect account') + '. ';
+                C('claim-title').textContent = d.sending ? 'Sending to Tescom Connect' : 'In your Tescom Connect account';
+                C('claim-lead').textContent = who + (d.sending ? 'Its UPS\u2019s readings go to Tescom Connect.'
+                    : d.next === 'plan' ? 'Its UPS is added; readings start once it is on a Tescom Connect Cloud plan.'
+                    : 'Now add the UPS it is plugged into, by the serial number on its label.');
                 C('claim-meta').textContent = d.lastError ? 'Last error: ' + d.lastError
                     : (d.lastHeartbeatAgoS !== undefined ? 'Cloud reached ' + d.lastHeartbeatAgoS + ' s ago' : '');
             } else if (d.state === 'pending') {
-                C('claim-title').textContent = 'Link this stick to your Tescom Connect account';
-                C('claim-lead').textContent = 'Open the sign-in page, sign in with your Tescom Connect account and approve this code. The Tescom Connect app on this network can also approve it.';
+                C('claim-title').textContent = 'Add this stick to Tescom Connect';
+                C('claim-lead').textContent = 'Open Tescom Connect, sign in (or create your account) and approve this code. Or scan the QR code on the stick\u2019s box.';
                 C('claim-code').textContent = d.userCode;
                 const min = Math.floor((d.expiresIn || 0) / 60), sec = (d.expiresIn || 0) % 60;
                 C('claim-meta').textContent = 'Valid for ' + min + ':' + String(sec).padStart(2, '0') + '; a new code follows by itself.';
             } else {
-                C('claim-title').textContent = 'Link this stick to your Tescom Connect account';
+                C('claim-title').textContent = 'Add this stick to Tescom Connect';
                 C('claim-lead').textContent = d.connected ? 'Asking Tescom Connect for a code\u2026'
                     : 'The code appears once the stick is on a Wi-Fi with internet access.';
                 C('claim-code').textContent = '----\u2011----';
