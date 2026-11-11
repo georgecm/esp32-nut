@@ -21,6 +21,7 @@ Status: 2026-11-11. Nothing here has run against a real UPS yet.
 | `esp32-s3-n16r8` env (16MB flash, octal PSRAM) | `platformio.ini` | Builds; not flashed yet |
 | `tescom-stick` env: board profile, hostname `tescom-stick-xxxxxx`, NUT description `Tescom stick (<model>)`, mDNS `_nut._tcp` with model TXT | `src/board/tescom_stick.cpp`, `src/network/mdns_announcer.*` | Builds; not flashed yet |
 | Zabbix sender: the "Tescom UPS by NUT" items over the trapper protocol, backlog while unreachable, SNTP time, settings page | `lib/ZabbixSender`, `src/network/zabbix_client.cpp`, NUT Server page | Native tests; builds; not yet sent to a real Zabbix |
+| Tescom Connect claim: own key + CSR, code from bridge.connect.tescom.gr, poll, credentials in NVS, heartbeat, Zabbix over TLS with the stick's certificate, code banner in the web UI, `GET /api/claim` | `lib/StickCloud`, `src/network/cloud_client.cpp`, `stick_identity.cpp`; cloud side in nut-app branch `feature/stick-claim` (`cloud/bridge/`, `/v1/stick/*`) | Native tests; cloud flow end to end on local Workers (`scripts/stick-claim.mjs`) and in the browser; firmware builds, not run on the board yet |
 | Native tests on macOS/Linux (`native-host` env) | `platformio.ini` | 875 of 878 pass on the Mac; `test_nut_table`, `test_rw_catalog` (clang `bind` ambiguity) and `test_record_replay` (float rounding) fail on the base commit too |
 
 Building: PlatformIO needs Python 3.10-3.14 (Homebrew's 3.15 is refused), so
@@ -135,17 +136,34 @@ and per serial; `start` gives nothing but the code; `poll` gives credentials
 only once, to the holder of `pollToken`. A claimed stick that is reset goes
 through the flow again; the cloud then replaces its certificate.
 
-What changes where:
+What is built (2026-11-11):
 
-- **Cloud (nut-app/cloud)**: `claim/start`, `claim/poll`, an approval page
-  and `POST /v1/stick/claims/:code/approve` for the app. Approval reuses
-  `/agent/register`'s steps (site, device row, Zabbix host, CA signs the CSR,
-  agent token).
-- **Firmware**: key pair and CSR with mbedTLS (key stays in NVS, never
-  leaves), the claim client, TLS with the client certificate in the Zabbix
-  sender (the cloud makes hosts that accept certificate connections only:
-  `tls_accept = 4`), the heartbeat, the code on the setup page and web UI.
-- **App**: "Add a stick" that reads `/api/claim` and approves.
+- **Bridge** (`nut-app/cloud/bridge`, its own Worker on
+  bridge.connect.tescom.gr): the page where the owner signs in (or creates
+  an account) with Tescom Connect, sees the stick (model, serial, MAC),
+  picks the site (their home by default) and approves. It forwards `/v1` to
+  the Connect Worker, so the stick talks only to the bridge.
+- **Cloud** (`nut-app/cloud`, `migrations/0009_stick_claims.sql`):
+  `POST /v1/stick/claim/start` and `/poll` for the stick,
+  `GET /v1/stick/claims/:code` and `POST .../approve` for the page and the
+  app. Approval does what `/agent/register` does: device row
+  (`agent_kind = 'stick'`), Zabbix host accepting only the stick's
+  certificate (`tls_accept = 4`), the CA signs the stick's request.
+- **Firmware** (tescom-stick env, `ENABLE_CLOUD_CLAIM`): ECDSA P-256 key made
+  on the stick (NVS `stick`), the claim task (`cloud_client.cpp`), the
+  credentials in NVS `cloud`, heartbeat every 30 s, unlink when the cloud
+  forgets the device, Zabbix over TLS with the certificate, the code banner
+  in the web UI and `GET /api/claim` (public on the LAN; approving still
+  needs the account). `POST /api/claim/unlink` (login) forgets the link.
+
+Not built yet:
+
+- the setup page showing the code before the setup network closes (the code
+  shows in the stick's web UI and on `GET /api/claim` once it is on Wi-Fi);
+- the app's "Add a stick" that reads `/api/claim` and approves in one click;
+- a cloud-plan rule for sticks (approval checks none today);
+- deployment: migration 0009, the Connect Worker, the bridge Worker and its
+  custom domain.
 
 ### Per-unit secrets on the label
 
@@ -239,6 +257,7 @@ The serial number joins the factory list the cloud already checks
 | CH34x serial host + Modbus for the Prime (not written yet) | Prime 1102 XL |
 | 5 V VBUS from the board's pads under the UPS's load | Any UPS |
 | App finds the stick by its 3493 scan, reads, shows the model | Any UPS + app |
+| Claim on the board: key and CSR made by mbedTLS accepted by the cloud, HTTPS to the bridge with the certificate bundle, TLS to zabbix.metagr.id with the stick's certificate | The board on Wi-Fi with internet, the bridge deployed (staging) |
 | Values reach Zabbix and fill the template's items; backlog after a Zabbix outage | Zabbix server + host with the template (a UPS for full readings; without one only `ups.link = driverDown` goes out) |
 
 ## Order of work
@@ -246,8 +265,9 @@ The serial number joins the factory list the cloud already checks
 1. ~~Profiles export and model detection~~ (done).
 2. ~~Board profile + env `tescom-stick`, mDNS with the NUT service and the model~~ (done).
 3. ~~Zabbix sender, plain TCP~~ (done).
-4. Claim flow: cloud endpoints, firmware key/CSR + claim client + Zabbix TLS
-   with the certificate + heartbeat, app "Add a stick".
+4. Claim flow: ~~cloud endpoints, bridge page, firmware key/CSR + claim
+   client + Zabbix TLS + heartbeat + web UI code~~ (done, not on hardware);
+   left: code on the setup page, app "Add a stick", deploy.
 5. Per-unit AP and login from a `factory` NVS partition, with a fallback for
    dev boards that have none.
 6. Signed OTA (app-level).
