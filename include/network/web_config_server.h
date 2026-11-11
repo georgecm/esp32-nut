@@ -12,6 +12,7 @@
 #include "CredentialStore.h"
 #include "LoginThrottle.h"
 #include "network/zabbix_client.h"
+#include "network/cloud_client.h"
 #include "SessionTable.h"
 #include "RecoveryWindow.h"
 #include "DiagnosticLED.h"
@@ -40,6 +41,7 @@ public:
     // Hostname of the Network page (US-113): store and name loaded at boot ("" = default)
     void setHostnameStore(HostnameStore* store, const String& saved);
     void setZabbixClient(ZabbixClient* client) { zabbix_client = client; }
+    void setCloudClient(CloudClient* client) { cloud_client = client; }
 
 private:
     WebServer server;
@@ -64,6 +66,7 @@ private:
     AutoShutdown* auto_shutdown = nullptr;
     HostnameStore* hostname_store = nullptr;
     ZabbixClient* zabbix_client = nullptr;
+    CloudClient* cloud_client = nullptr;
     String saved_hostname;
 
     void handleConnect();

@@ -672,6 +672,10 @@ void test_decide_table(void) {
         {"/login", true, false, true, false, AuthDecision::ALLOW},
         {"/api/auth/login", false, false, true, false, AuthDecision::ALLOW},
         {"/api/auth/status", true, false, true, false, AuthDecision::ALLOW},
+        // The Tescom Connect code is read by the app before anyone signs in here; unlinking is not public
+        {"/api/claim", true, false, true, false, AuthDecision::ALLOW},
+        {"/api/claim", false, false, true, false, AuthDecision::UNAUTHORIZED},
+        {"/api/claim/unlink", false, false, true, false, AuthDecision::UNAUTHORIZED},
         {"/api/auth/credentials", false, false, false, false, AuthDecision::ALLOW},
         {"/api/auth/logout", false, false, true, false, AuthDecision::ALLOW},
         // Pagine senza sessione

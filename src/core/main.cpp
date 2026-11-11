@@ -16,6 +16,10 @@
 #include "NetBootPlan.h"
 #include "network/mdns_announcer.h"
 #include "network/zabbix_client.h"
+#include "network/tls_gate.h"
+#ifdef ENABLE_CLOUD_CLAIM
+#include "network/cloud_client.h"
+#endif
 
 USBHostUPS usb_ups;
 ConfigManager config_mgr;
@@ -40,6 +44,10 @@ static MdnsAnnouncer mdns_announcer;
 
 // UPS readings to Zabbix, as tescom-agent sends them from a Raspberry Pi
 static ZabbixClient zabbix_client;
+#ifdef ENABLE_CLOUD_CLAIM
+// Tescom Connect: the claim code, then the heartbeat and the Zabbix settings it gives
+static CloudClient cloud_client;
+#endif
 static const uint32_t MDNS_CHECK_MS = 2000;
 
 // Runs from the loopTask, as INSTCMD and the Web UI commands. It reads the UPS over USB
@@ -242,8 +250,13 @@ void setup() {
         } else {
             AppLogger::log("INFO", "[MAIN] NUTServer started correctly on port 3493.");
         }
+        TlsGate::init();
         zabbix_client.begin(&usb_ups, &network_mgr);
         web_server.setZabbixClient(&zabbix_client);
+#ifdef ENABLE_CLOUD_CLAIM
+        cloud_client.begin(&usb_ups, &network_mgr, &zabbix_client);
+        web_server.setCloudClient(&cloud_client);
+#endif
     }
 }
 

@@ -2,10 +2,13 @@
 #include "USBHostUPS.h"
 #include "core/app_logger.h"
 #include "network/network_manager.h"
+#include "network/tls_gate.h"
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <WiFi.h>
 #include <time.h>
+#include <memory>
 
 #ifndef ZABBIX_DEFAULT_SERVER
 #define ZABBIX_DEFAULT_SERVER ""
@@ -92,6 +95,47 @@ bool ZabbixClient::save(const Zabbix::Settings& s) {
     return true;
 }
 
+void ZabbixClient::setManaged(const Managed& m) {
+    {
+        Guard g(_mutex);
+        bool target_changed = !_managed || m.server != _managed_settings.server || m.host != _managed_settings.host;
+        _managed = true;
+        _managed_settings = m;
+        if (target_changed) _backlog.clear();
+        _failing = false;
+        _last_error = "";
+    }
+    AppLogger::log("INFO", "[ZABBIX] Managed by Tescom Connect: %s:%u host \"%s\" over TLS", m.server.c_str(),
+                   (unsigned)m.port, m.host.c_str());
+    _send_now = true;
+}
+
+void ZabbixClient::clearManaged() {
+    Guard g(_mutex);
+    if (!_managed) return;
+    _managed = false;
+    _managed_settings = Managed();
+    _backlog.clear();
+    AppLogger::log("INFO", "[ZABBIX] No longer managed by Tescom Connect: back to the saved settings");
+}
+
+bool ZabbixClient::managed() const {
+    Guard g(_mutex);
+    return _managed;
+}
+
+Zabbix::Settings ZabbixClient::active() const {
+    Guard g(_mutex);
+    if (!_managed) return _settings;
+    Zabbix::Settings s;
+    s.enabled = true;
+    s.server = _managed_settings.server;
+    s.port = _managed_settings.port;
+    s.host = _managed_settings.host;
+    s.interval_s = _settings.interval_s;
+    return s;
+}
+
 void ZabbixClient::sendNow() {
     _send_now = true;
 }
@@ -100,13 +144,17 @@ String ZabbixClient::statusJson() const {
     JsonDocument doc;
     {
         Guard g(_mutex);
-        doc["enabled"] = _settings.enabled;
-        doc["server"] = _settings.server.c_str();
-        doc["port"] = _settings.port;
-        doc["host"] = _settings.host.c_str();
+        bool on = _managed || _settings.enabled;
+        doc["enabled"] = on;
+        doc["server"] = _managed ? _managed_settings.server.c_str() : _settings.server.c_str();
+        doc["port"] = _managed ? _managed_settings.port : _settings.port;
+        doc["host"] = _managed ? _managed_settings.host.c_str() : _settings.host.c_str();
         doc["interval"] = _settings.interval_s;
+        doc["managed"] = _managed;
+        doc["tls"] = _managed;
+        if (_managed) doc["deviceId"] = _managed_settings.device_id.c_str();
         JsonObject st = doc["status"].to<JsonObject>();
-        st["state"] = !_settings.enabled ? "off" : _failing ? "failing" : _ever_ok ? "ok" : "waiting";
+        st["state"] = !on ? "off" : _failing ? "failing" : _ever_ok ? "ok" : "waiting";
         if (_ever_ok) st["lastOkAgoS"] = (millis() - _last_ok_ms) / 1000;
         st["lastError"] = _last_error;
         st["lastProcessed"] = _last_processed;
@@ -131,7 +179,7 @@ void ZabbixClient::run() {
     bool first = true;
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(200));
-        Zabbix::Settings s = settings();
+        Zabbix::Settings s = active();
         if (!s.enabled) continue;
 
         bool connected = _net && _net->isConnected();
@@ -220,9 +268,31 @@ bool ZabbixClient::sendBatch(const Zabbix::Settings& s, size_t count, Zabbix::Ou
         payload = Zabbix::frame(Zabbix::requestJson(batch, nowUnix()));
     }
 
-    WiFiClient client;
+    // TLS with the stick's certificate when Tescom Connect manages the settings
+    Managed tls;
+    bool use_tls;
+    {
+        Guard g(_mutex);
+        use_tls = _managed;
+        if (use_tls) tls = _managed_settings;
+    }
+    std::unique_ptr<TlsGate> gate;
+    // ESPLwIPClient: the base whose connect(host, port, timeout) and Client calls are virtual
+    std::unique_ptr<ESPLwIPClient> owned;
+    if (use_tls) {
+        gate.reset(new TlsGate());
+        auto* secure = new WiFiClientSecure();
+        secure->setCACert(tls.server_ca_pem.c_str());
+        secure->setCertificate(tls.cert_pem.c_str());
+        secure->setPrivateKey(tls.key_pem.c_str());
+        secure->setHandshakeTimeout(CONNECT_TIMEOUT_MS / 1000 + 5);
+        owned.reset(secure);
+    } else {
+        owned.reset(new WiFiClient());
+    }
+    ESPLwIPClient& client = *owned;
     if (!client.connect(s.server.c_str(), s.port, CONNECT_TIMEOUT_MS)) {
-        error = "could not connect";
+        error = use_tls ? "could not connect (TCP or TLS handshake)" : "could not connect";
         return false;
     }
     size_t written = client.write((const uint8_t*)payload.data(), payload.size());

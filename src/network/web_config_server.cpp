@@ -105,6 +105,23 @@ void WebConfigServer::begin(bool isAPMode) {
     // Zabbix sender (docs/tescom-stick.md): not public in AuthPolicy, so protected by the login
     server.on("/api/zabbix", HTTP_GET, guarded([this]() { handleGetZabbix(); }));
     server.on("/api/zabbix", HTTP_POST, guarded([this]() { handleSetZabbix(); }));
+    // Tescom Connect claim (docs/tescom-stick.md): the code, public in AuthPolicy; unlink needs the login
+    server.on("/api/claim", HTTP_GET, guarded([this]() {
+        if (!cloud_client) {
+            server.send(200, "application/json", "{\"state\":\"off\"}");
+            return;
+        }
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(200, "application/json", cloud_client->statusJson());
+    }));
+    server.on("/api/claim/unlink", HTTP_POST, guarded([this]() {
+        if (!cloud_client) {
+            server.send(404, "application/json", "{\"error\":\"Tescom Connect is not in this firmware\"}");
+            return;
+        }
+        cloud_client->unlink();
+        server.send(202, "application/json", "{\"ok\":true}");
+    }));
     server.on("/api/zabbix/send", HTTP_POST, guarded([this]() {
         if (!zabbix_client) {
             server.send(503, "application/json", "{\"error\":\"Zabbix not available\"}");
@@ -261,6 +278,11 @@ void WebConfigServer::handleSetZabbix() {
     JsonDocument doc;
     if (!server.hasArg("plain") || deserializeJson(doc, server.arg("plain"))) {
         server.send(400, "application/json", "{\"error\":\"Invalid request\"}");
+        return;
+    }
+    if (zabbix_client->managed()) {
+        server.send(409, "application/json",
+                    "{\"error\":\"Set by Tescom Connect: unlink the stick to change them here\"}");
         return;
     }
     Zabbix::Settings next = zabbix_client->settings();

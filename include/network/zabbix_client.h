@@ -34,18 +34,41 @@ public:
     // Settings and state as JSON for GET /api/zabbix
     String statusJson() const;
 
+    /**
+     * @brief Settings given by Tescom Connect when the stick was claimed: they replace the
+     * saved ones (which stay in NVS for when the stick is released) and go over TLS with
+     * the stick's certificate, as the cloud's Zabbix hosts accept nothing else.
+     */
+    struct Managed {
+        std::string server;
+        uint16_t port = 10051;
+        std::string host;
+        std::string server_ca_pem;
+        std::string cert_pem;
+        std::string key_pem;
+        std::string device_id;
+    };
+    void setManaged(const Managed& m);
+    // Back to the saved settings (the stick was removed from the account)
+    void clearManaged();
+    bool managed() const;
+
 private:
     static void taskEntry(void* arg);
     void run();
     void collect(const Zabbix::Settings& s, uint64_t clock);
     bool sendBacklog(const Zabbix::Settings& s);
     bool sendBatch(const Zabbix::Settings& s, size_t count, Zabbix::Outcome& outcome, String& error);
+    // The settings in use: the managed ones when set, else the saved ones
+    Zabbix::Settings active() const;
 
     USBHostUPS* _ups = nullptr;
     AppNetworkManager* _net = nullptr;
     mutable SemaphoreHandle_t _mutex = nullptr;
     TaskHandle_t _task = nullptr;
     Zabbix::Settings _settings;
+    bool _managed = false;
+    Managed _managed_settings;
     Zabbix::Backlog _backlog;
     volatile bool _send_now = false;
     bool _sntp_started = false;

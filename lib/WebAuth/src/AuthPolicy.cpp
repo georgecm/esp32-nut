@@ -3,7 +3,9 @@
 
 bool AuthPolicy::isPublicRoute(const String& path, bool is_get) {
     if (is_get) {
-        return path == "/login" || path == "/api/auth/status";
+        // /api/claim: the stick's Tescom Connect code, read by the app on the LAN before
+        // anyone signed in here; approving it still needs a Tescom Connect account
+        return path == "/login" || path == "/api/auth/status" || path == "/api/claim";
     }
     return path == "/api/auth/login" || path == "/api/auth/credentials" || path == "/api/auth/logout";
 }
