@@ -105,6 +105,32 @@ void Flow::restore(const Credentials& c) {
     _state = State::CLAIMED;
 }
 
+bool Flow::pending(PendingCode& out, uint32_t now) const {
+    if (_state != State::PENDING || _pre_approved) return false;
+    uint32_t left = expiresInS(now);
+    if (!left) return false;
+    out.user_code = _user_code;
+    out.verify_url = _verify_url;
+    out.poll_token = _poll_token;
+    out.expires_in_s = left;
+    out.interval_s = _interval_ms / 1000;
+    return true;
+}
+
+bool Flow::resume(const PendingCode& p, uint32_t now) {
+    if (_state == State::CLAIMED || p.user_code.empty() || p.poll_token.empty() || !p.expires_in_s) return false;
+    reset();
+    _user_code = p.user_code;
+    _verify_url = p.verify_url;
+    _poll_token = p.poll_token;
+    _interval_ms = (p.interval_s < 2 ? 2 : p.interval_s) * 1000;
+    _expires_at = now + p.expires_in_s * 1000;
+    _next_at = now;
+    _has_next = true;
+    _state = State::PENDING;
+    return true;
+}
+
 void Flow::reset() {
     *this = Flow();
 }

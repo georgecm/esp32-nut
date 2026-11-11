@@ -177,6 +177,55 @@ void test_heartbeat_answer(void) {
     TEST_ASSERT_FALSE(parseHeartbeat("not json", a));
 }
 
+void test_pending_code_survives_restart(void) {
+    Flow f;
+    PendingCode p;
+    TEST_ASSERT_FALSE(f.pending(p, 0));  // nothing shown yet
+    TEST_ASSERT_TRUE(f.onStart(201, START_OK, 1000));
+    TEST_ASSERT_TRUE(f.pending(p, 61000));
+    TEST_ASSERT_EQUAL_STRING("XFV7-S224", p.user_code.c_str());
+    TEST_ASSERT_EQUAL_STRING("tok", p.poll_token.c_str());
+    TEST_ASSERT_EQUAL_UINT32(840, p.expires_in_s);
+    TEST_ASSERT_EQUAL_UINT32(5, p.interval_s);
+
+    // After the restart: the same code, polled at once, the time left kept
+    Flow g;
+    TEST_ASSERT_TRUE(g.resume(p, 500));
+    TEST_ASSERT_TRUE(g.state() == State::PENDING);
+    TEST_ASSERT_EQUAL_STRING("XFV7-S224", g.userCode().c_str());
+    TEST_ASSERT_EQUAL_STRING("https://connect.tescom.gr/?link-stick=XFV7-S224", g.verifyUrl().c_str());
+    TEST_ASSERT_TRUE(g.due(500));
+    TEST_ASSERT_EQUAL_UINT32(840, g.expiresInS(500));
+    TEST_ASSERT_TRUE(g.onPoll(200, POLL_OK, 600));
+    TEST_ASSERT_TRUE(g.state() == State::CLAIMED);
+}
+
+void test_pending_code_not_kept_when_useless(void) {
+    Flow f;
+    PendingCode p;
+    // Approved at once (factory secret): no code to keep
+    TEST_ASSERT_TRUE(f.onStart(201, "{\"userCode\":\"A\",\"pollToken\":\"t\",\"approved\":true}", 0));
+    TEST_ASSERT_FALSE(f.pending(p, 10));
+    // Expired, or incomplete: not resumed
+    PendingCode old;
+    old.user_code = "XFV7-S224";
+    old.poll_token = "tok";
+    old.expires_in_s = 0;
+    Flow g;
+    TEST_ASSERT_FALSE(g.resume(old, 0));
+    TEST_ASSERT_TRUE(g.state() == State::UNCLAIMED);
+    old.expires_in_s = 60;
+    old.poll_token = "";
+    TEST_ASSERT_FALSE(g.resume(old, 0));
+    // A claimed stick keeps its credentials
+    Flow h;
+    TEST_ASSERT_TRUE(h.onStart(201, START_OK, 0));
+    TEST_ASSERT_TRUE(h.onPoll(200, POLL_OK, 10));
+    old.poll_token = "tok";
+    TEST_ASSERT_FALSE(h.resume(old, 20));
+    TEST_ASSERT_TRUE(h.state() == State::CLAIMED);
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_start_body);
@@ -190,5 +239,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_approved_without_zabbix_yet);
     RUN_TEST(test_pre_approved_start_polls_soon);
     RUN_TEST(test_heartbeat_answer);
+    RUN_TEST(test_pending_code_survives_restart);
+    RUN_TEST(test_pending_code_not_kept_when_useless);
     return UNITY_END();
 }

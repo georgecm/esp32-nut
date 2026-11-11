@@ -100,6 +100,18 @@ std::string heartbeatBody(const std::string& fw_version, uint64_t started_at_ms,
                           const char* ups_status);
 
 /**
+ * @brief A shown code, kept across the restart that ends the setup network: the code on
+ * the setup page stays the one to approve (a new start would replace it in the cloud).
+ */
+struct PendingCode {
+    std::string user_code;
+    std::string verify_url;
+    std::string poll_token;
+    uint32_t expires_in_s = 0;
+    uint32_t interval_s = 5;
+};
+
+/**
  * @brief The claim as it moves: what to show, when to call the cloud next.
  *
  * Times are the caller's milliseconds (millis()); unsigned arithmetic, so they wrap safely.
@@ -119,6 +131,11 @@ public:
 
     // A stick that was claimed before (credentials from NVS)
     void restore(const Credentials& c);
+    // The code being shown, to keep across a restart; false when there is none (or the
+    // stick was approved at once: nothing to show, a new start approves it again)
+    bool pending(PendingCode& out, uint32_t now) const;
+    // Go on with a code from before the restart: polled at once; ignored when expired or incomplete
+    bool resume(const PendingCode& p, uint32_t now);
     // Forget everything: the device was removed in the cloud, or the owner reset the stick
     void reset();
 
