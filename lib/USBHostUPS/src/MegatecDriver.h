@@ -15,6 +15,7 @@
 
 #include "IUPSDriver.h"
 #include "IUpsControl.h"
+#include "UpsProfiles.h"
 
 /**
  * @brief nutdrv_qx with the Megatec protocol over the string-descriptor transports of the
@@ -36,12 +37,15 @@ public:
         HUNNOX,
     };
 
-    explicit MegatecDriver(Transport transport = Transport::HUNNOX) : _transport(transport) {}
+    explicit MegatecDriver(Transport transport = Transport::HUNNOX, uint16_t vid = 0x0001, uint16_t pid = 0x0000)
+        : _transport(transport), _vid(vid), _pid(pid) {}
 
     const char* getDriverName() const override {
         return _transport == Transport::HUNNOX ? "MegatecDriver (hunnox)" : "MegatecDriver (fabula)";
     }
     Transport transport() const { return _transport; }
+    // The maker's profile the readings were matched to (UpsProfiles), nullptr until then
+    const UpsProfiles::Profile* profile() const { return _profile; }
 
     void setup() override;
     void loop(IHidTransport* host, UPSData& data, uint32_t now) override;
@@ -78,7 +82,14 @@ private:
     // hunnox_protocol(): one step of the lock-step requests before the command at index
     void hunnoxStep(IHidTransport* host, uint8_t index);
 
+    // Matches the reading to a profile once the ratings are in (once: the model never changes)
+    void identify(IHidTransport* host, const UPSData& data);
+
     Transport _transport;
+    uint16_t _vid;
+    uint16_t _pid;
+    const UpsProfiles::Profile* _profile = nullptr;
+    bool _identified = false;
     uint8_t _hunnox_step = 0;
     uint32_t _last_poll = 0;
     bool _polled = false;

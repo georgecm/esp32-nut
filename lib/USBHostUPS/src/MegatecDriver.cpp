@@ -54,6 +54,24 @@ void MegatecDriver::setup() {
     _polled = false;
     _ratings_ok = false;
     _q1_ok = false;
+    _profile = nullptr;
+    _identified = false;
+}
+
+void MegatecDriver::identify(IHidTransport* host, const UPSData& data) {
+    if (_identified || !_ratings_ok) return;
+    _identified = true;
+    size_t candidates = 0;
+    host->lock();
+    _profile = UpsProfiles::identify(_vid, _pid, data, &candidates);
+    String nominal = data.get("battery.voltage.nominal");
+    host->unlock();
+    if (_profile) {
+        host->logDebug(String("[Megatec] profile ") + _profile->key + ": " + _profile->model);
+    } else {
+        host->logDebug(String("[Megatec] no single profile fits (") + String((unsigned)candidates) +
+                       " candidates), battery.voltage.nominal " + nominal);
+    }
 }
 
 uint8_t MegatecDriver::indexOf(const char* cmd) const {
@@ -132,16 +150,33 @@ void MegatecDriver::loop(IHidTransport* host, UPSData& data, uint32_t now) {
     }
 
     if (!command(host, "Q1", reply, sizeof(reply))) return;
+    int packs = _profile ? UpsProfiles::batteryPacks(*_profile) : 1;
     host->lock();
-    bool ok = Megatec::parseQ1(reply, data);
+    bool ok = Megatec::parseQ1(reply, data, packs);
     if (ok) {
-        Megatec::estimateCharge(data);
         data.set("driver.name", "nutdrv_qx");
         data.set("driver.parameter.subdriver", _transport == Transport::HUNNOX ? "hunnox" : "fabula");
         data.set("driver.version.data", "Megatec 0.06");
         data.set("device.type", "ups");
     }
     host->unlock();
+
+    if (ok && !_identified && _ratings_ok) identify(host, data);
+
+    if (ok) {
+        host->lock();
+        double low = 0, high = 0;
+        if (_profile) {
+            // The first reading after the match is scaled with the profile's packs too
+            int profile_packs = UpsProfiles::batteryPacks(*_profile);
+            if (profile_packs != packs) Megatec::parseQ1(reply, data, profile_packs);
+            UpsProfiles::apply(*_profile, data);
+            UpsProfiles::number(*_profile, "battery.voltage.low", low);
+            UpsProfiles::number(*_profile, "battery.voltage.high", high);
+        }
+        Megatec::estimateCharge(data, low, high);
+        host->unlock();
+    }
     if (ok) {
         _q1_ok = true;
     } else {

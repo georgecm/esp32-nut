@@ -4,6 +4,7 @@
 #include "MegatecDriver.h"
 #include "MegatecProtocol.h"
 #include "UPSData.h"
+#include "UpsProfiles.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -278,6 +279,105 @@ void test_registry_picks_the_transport(void) {
     delete d;
 }
 
+// --- UpsProfiles (the tables generated from nut-app's profiles/*.conf) ---
+
+void test_profiles_exported(void) {
+    const UpsProfiles::Profile* leo = UpsProfiles::find("leo");
+    TEST_ASSERT_NOT_NULL(leo);
+    TEST_ASSERT_EQUAL_STRING("Tescom Leo LCD", leo->model);
+    TEST_ASSERT_EQUAL_STRING("Leo LCD", leo->shortModel());
+    TEST_ASSERT_TRUE(leo->has_usb_id);
+    TEST_ASSERT_EQUAL_HEX16(0x0001, leo->vid);
+    TEST_ASSERT_EQUAL_HEX16(0x0000, leo->pid);
+    TEST_ASSERT_EQUAL_STRING("hunnox", leo->subdriver);
+    TEST_ASSERT_EQUAL_STRING("", leo->option("novendor"));
+    TEST_ASSERT_NULL(leo->option("port"));
+    const UpsProfiles::Profile* prime = UpsProfiles::find("prime");
+    TEST_ASSERT_NOT_NULL(prime);
+    TEST_ASSERT_EQUAL_HEX16(0x1a86, prime->vid);
+    TEST_ASSERT_EQUAL_HEX16(0x7523, prime->pid);
+    TEST_ASSERT_TRUE(UpsProfiles::knowsUsbId(0x0001, 0x0000));
+    TEST_ASSERT_FALSE(UpsProfiles::knowsUsbId(0x0463, 0xffff));
+}
+
+static void pollOnce(MegatecDriver& driver, const char* f) {
+    driver.setup();
+    bridge.replies[0x03] = LEO_Q1;
+    bridge.replies[0x0d] = f;
+    driver.loop(&bridge, data, 10000);
+}
+
+void test_driver_names_the_leo(void) {
+    MegatecDriver driver;
+    pollOnce(driver, LEO_F);
+    TEST_ASSERT_NOT_NULL(driver.profile());
+    TEST_ASSERT_EQUAL_STRING("leo", driver.profile()->key);
+    TEST_ASSERT_EQUAL_STRING("Tescom", data.get("device.mfr").c_str());
+    TEST_ASSERT_EQUAL_STRING("Leo LCD", data.get("ups.model").c_str());
+    TEST_ASSERT_EQUAL_STRING("Leo LCD", data.get("device.model").c_str());
+    // The LEO profile sets no battery limits: NUT's guess stays
+    TEST_ASSERT_EQUAL_STRING("20.80", data.get("battery.voltage.low").c_str());
+}
+
+void test_driver_names_the_smartbox(void) {
+    MegatecDriver driver;
+    pollOnce(driver, SMARTBOX_F);
+    TEST_ASSERT_NOT_NULL(driver.profile());
+    TEST_ASSERT_EQUAL_STRING("smartbox", driver.profile()->key);
+    TEST_ASSERT_EQUAL_STRING("Leo SmartBox", data.get("ups.model").c_str());
+}
+
+void test_driver_without_a_fitting_profile(void) {
+    MegatecDriver driver;
+    pollOnce(driver, "#230.0 004 036.0 50.0\r");
+    TEST_ASSERT_NULL(driver.profile());
+    TEST_ASSERT_FALSE(data.hasKey("ups.model"));
+    TEST_ASSERT_TRUE(driver.initialPollDone());
+    // Another USB ID never gets a Tescom profile, even with the LEO's ratings
+    MegatecDriver other(MegatecDriver::Transport::HUNNOX, 0x0665, 0x5161);
+    data = UPSData();
+    pollOnce(other, LEO_F);
+    TEST_ASSERT_NULL(other.profile());
+}
+
+void test_profile_settings_of_the_lion(void) {
+    // What the LiON RT's driver reports; nutdrv_qx_mec (krauler) is not ported yet
+    data.set("driver.name", "nutdrv_qx_mec");
+    data.set("battery.voltage.nominal", "24.0");
+    data.set("battery.voltage.low", "20.00");
+    const UpsProfiles::Profile* lion = UpsProfiles::identify(0x0001, 0x0000, data);
+    TEST_ASSERT_NOT_NULL(lion);
+    TEST_ASSERT_EQUAL_STRING("lion", lion->key);
+    TEST_ASSERT_EQUAL_INT(48, UpsProfiles::batteryPacks(*lion));
+    TEST_ASSERT_EQUAL_INT(1, UpsProfiles::batteryPacks(*UpsProfiles::find("leo")));
+
+    UpsProfiles::apply(*lion, data);
+    TEST_ASSERT_EQUAL_STRING("25.6", data.get("battery.voltage.nominal").c_str()); // override.
+    TEST_ASSERT_EQUAL_STRING("230", data.get("input.voltage.nominal").c_str());
+    TEST_ASSERT_EQUAL_STRING("20.00", data.get("battery.voltage.low").c_str()); // default. kept
+    TEST_ASSERT_EQUAL_STRING("26.8", data.get("battery.voltage.high").c_str()); // default. set
+
+    double low = 0, high = 0;
+    TEST_ASSERT_TRUE(UpsProfiles::number(*lion, "battery.voltage.low", low));
+    TEST_ASSERT_TRUE(UpsProfiles::number(*lion, "battery.voltage.high", high));
+    data.set("battery.voltage", "25.40");
+    Megatec::estimateCharge(data, low, high);
+    TEST_ASSERT_EQUAL_STRING("50", data.get("battery.charge").c_str());
+}
+
+void test_match_numbers_and_text(void) {
+    const UpsProfiles::Profile* leo = UpsProfiles::find("leo");
+    data.set("driver.name", "nutdrv_qx");
+    data.set("driver.parameter.subdriver", "hunnox");
+    data.set("battery.voltage.nominal", "24.00");
+    TEST_ASSERT_TRUE(UpsProfiles::matches(*leo, data));
+    data.set("battery.voltage.nominal", "24.5");
+    TEST_ASSERT_FALSE(UpsProfiles::matches(*leo, data));
+    data.set("battery.voltage.nominal", "24");
+    data.set("driver.parameter.subdriver", "fabula");
+    TEST_ASSERT_FALSE(UpsProfiles::matches(*leo, data));
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_decode_string_descriptor);
@@ -296,5 +396,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_fabula_asks_without_lock_step);
     RUN_TEST(test_reads_only);
     RUN_TEST(test_registry_picks_the_transport);
+    RUN_TEST(test_profiles_exported);
+    RUN_TEST(test_driver_names_the_leo);
+    RUN_TEST(test_driver_names_the_smartbox);
+    RUN_TEST(test_driver_without_a_fitting_profile);
+    RUN_TEST(test_profile_settings_of_the_lion);
+    RUN_TEST(test_match_numbers_and_text);
     return UNITY_END();
 }

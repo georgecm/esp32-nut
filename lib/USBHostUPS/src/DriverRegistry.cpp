@@ -67,7 +67,7 @@ IUPSDriver* DriverRegistry::create(uint16_t vid, uint16_t pid, const char* mfr, 
     // ported: krauler needs the 102-byte warm-up of the Tescom LiON RT.
     if (isQx(vid, pid)) {
         bool mec = mfr && strcmp(mfr, "MEC") == 0 && contains(product, "MEC0003");
-        return new MegatecDriver(mec ? MegatecDriver::Transport::FABULA : MegatecDriver::Transport::HUNNOX);
+        return new MegatecDriver(mec ? MegatecDriver::Transport::FABULA : MegatecDriver::Transport::HUNNOX, vid, pid);
     }
     // liebert_usb_device_table: other Phoenixtec products stay generic, as upstream
     // rejects them unless the productid option is given

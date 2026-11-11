@@ -1,0 +1,116 @@
+{
+  "source": "nut-app/profiles",
+  "manufacturer": "Tescom",
+  "profiles": [
+    {
+      "key": "leo",
+      "model": "Tescom Leo LCD",
+      "link": "USB",
+      "usbId": "0001:0000",
+      "driver": "nutdrv_qx",
+      "subdriver": "hunnox",
+      "options": {
+        "vendorid": "0001",
+        "productid": "0000",
+        "langid_fix": "0x0409",
+        "novendor": true,
+        "noscanlangid": true
+      },
+      "match": [
+        [
+          "driver",
+          "nutdrv_qx"
+        ],
+        [
+          "subdriver",
+          "hunnox"
+        ],
+        [
+          "battery.voltage.nominal",
+          "24"
+        ]
+      ],
+      "tested": "2026-10-23 on a Raspberry Pi, NUT 2.8.0: readings and a power cut (OL, OB, OL)"
+    },
+    {
+      "key": "lion",
+      "model": "Tescom LiON",
+      "link": "USB",
+      "usbId": "0001:0000",
+      "driver": "nutdrv_qx_mec",
+      "subdriver": "krauler",
+      "options": {
+        "vendorid": "0001",
+        "productid": "0000",
+        "protocol": "megatec",
+        "langid_fix": "0x0409",
+        "noscanlangid": true,
+        "novendor": true,
+        "override.input.voltage.nominal": "230",
+        "override.input.frequency.nominal": "50",
+        "override.input.current.nominal": "4.0",
+        "pollinterval": "2",
+        "battery_voltage_reports_one_pack": true,
+        "override.battery.packs": "48",
+        "override.battery.voltage.nominal": "25.6",
+        "default.battery.voltage.low": "24.0",
+        "default.battery.voltage.high": "26.8"
+      },
+      "match": [
+        [
+          "driver",
+          "nutdrv_qx_mec"
+        ]
+      ],
+      "tested": "not confirmed here; copied from the server's ups.conf of 2026-10-27"
+    },
+    {
+      "key": "prime",
+      "model": "Tescom Prime",
+      "link": "Serial",
+      "usbId": "1a86:7523",
+      "driver": "tescom_prime",
+      "subdriver": null,
+      "options": {
+        "pollinterval": "2"
+      },
+      "match": [
+        [
+          "driver",
+          "tescom_prime"
+        ]
+      ],
+      "tested": "driver built and bundled 2026-11-03, not yet run against the UPS; registers read from one Prime 1102 XL (docs/PRIME-MODBUS.md)"
+    },
+    {
+      "key": "smartbox",
+      "model": "Tescom Leo SmartBox",
+      "link": "USB",
+      "usbId": "0001:0000",
+      "driver": "nutdrv_qx",
+      "subdriver": "hunnox",
+      "options": {
+        "vendorid": "0001",
+        "productid": "0000",
+        "langid_fix": "0x0409",
+        "novendor": true,
+        "noscanlangid": true
+      },
+      "match": [
+        [
+          "driver",
+          "nutdrv_qx"
+        ],
+        [
+          "subdriver",
+          "hunnox"
+        ],
+        [
+          "battery.voltage.nominal",
+          "12"
+        ]
+      ],
+      "tested": "2026-11-02 on a Raspberry Pi, NUT 2.8.0: readings and a switch to battery (OL to OB)"
+    }
+  ]
+}

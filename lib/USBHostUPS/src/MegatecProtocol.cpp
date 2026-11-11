@@ -127,12 +127,13 @@ bool parseF(const char* reply, UPSData& data) {
     return true;
 }
 
-void estimateCharge(UPSData& data) {
+void estimateCharge(UPSData& data, double low, double high) {
     if (!data.hasKey("battery.voltage.nominal") || !data.hasKey("battery.voltage")) return;
     double nominal = data.getFloat("battery.voltage.nominal");
     if (nominal <= 0) return;
-    double low = 104 * nominal / 120;
-    double high = 130 * nominal / 120;
+    if (low <= 0) low = 104 * nominal / 120;
+    if (high <= 0) high = 130 * nominal / 120;
+    if (high <= low) return;
     data.set("battery.voltage.low", format("%.2f", low));
     data.set("battery.voltage.high", format("%.2f", high));
 

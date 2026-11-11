@@ -69,8 +69,11 @@ namespace Megatec {
      * @brief battery.voltage.low/high from the nominal voltage (104/120 and 130/120 of it,
      * qx_initbattery), then battery.charge from battery.voltage between them (qx_battery).
      * Does nothing without battery.voltage.nominal and battery.voltage.
+     *
+     * @param low, high limits set in ups.conf (default.battery.voltage.low/high) take the
+     *        place of the guessed ones; 0 to guess
      */
-    void estimateCharge(UPSData& data);
+    void estimateCharge(UPSData& data, double low = 0, double high = 0);
 }
 
 #endif // MEGATEC_PROTOCOL_H
