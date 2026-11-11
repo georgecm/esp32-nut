@@ -6,7 +6,7 @@
 using namespace StickClaim;
 
 static const char* START_OK =
-    "{\"userCode\":\"XFV7-S224\",\"verifyUrl\":\"https://bridge.connect.tescom.gr/?code=XFV7-S224\","
+    "{\"userCode\":\"XFV7-S224\",\"verifyUrl\":\"https://connect.tescom.gr/?link-stick=XFV7-S224\","
     "\"pollToken\":\"tok\",\"interval\":5,\"expiresIn\":900}";
 static const char* POLL_OK =
     "{\"status\":\"approved\",\"deviceId\":\"dev-1\",\"name\":\"Leo LCD (stick)\",\"organization\":\"Shop SA\","
@@ -29,6 +29,10 @@ void test_start_body(void) {
     TEST_ASSERT_EQUAL_STRING("Leo LCD", doc["model"]);
     TEST_ASSERT_FALSE(doc["serial"].is<const char*>()); // left out when unknown
     TEST_ASSERT_EQUAL_STRING(r.csr_pem.c_str(), doc["csr"]);
+    TEST_ASSERT_FALSE(doc["secret"].is<const char*>()); // no factory secret, none sent
+    r.secret = "7JPMNKMIXTAO4PG5";
+    TEST_ASSERT_FALSE(deserializeJson(doc, startBody(r)));
+    TEST_ASSERT_EQUAL_STRING("7JPMNKMIXTAO4PG5", doc["secret"]);
     TEST_ASSERT_EQUAL_STRING("{\"pollToken\":\"a\\\"b\"}", pollBody("a\"b").c_str());
 }
 
@@ -129,6 +133,50 @@ void test_heartbeat_body(void) {
     TEST_ASSERT_TRUE(doc["status"]["startedAtMs"].as<uint64_t>() == 1700000000000ULL);
 }
 
+void test_approved_without_zabbix_yet(void) {
+    // The UPS behind the stick is not added (or has no plan): no Zabbix, still claimed
+    Flow f;
+    f.onStart(201, START_OK, 0);
+    TEST_ASSERT_TRUE(f.onPoll(200,
+                              "{\"status\":\"approved\",\"deviceId\":\"dev-1\",\"agentToken\":\"jwt\",\"zabbix\":null,"
+                              "\"next\":\"ups\",\"manageUrl\":\"https://connect.tescom.gr/?stick=dev-1\","
+                              "\"tls\":{\"ca\":\"CA\",\"serverCa\":\"SCA\",\"cert\":\"CERT\"}}",
+                              5000));
+    const Credentials& c = f.credentials();
+    TEST_ASSERT_TRUE(c.zabbix().empty());
+    TEST_ASSERT_EQUAL_STRING("ups", c.next.c_str());
+    TEST_ASSERT_EQUAL_STRING("https://connect.tescom.gr/?stick=dev-1", c.manage_url.c_str());
+}
+
+void test_pre_approved_start_polls_soon(void) {
+    Flow f;
+    TEST_ASSERT_TRUE(f.onStart(201, "{\"userCode\":\"AAAA-BBBB\",\"pollToken\":\"t\",\"interval\":1,\"approved\":true}", 0));
+    TEST_ASSERT_TRUE(f.preApproved());
+    TEST_ASSERT_TRUE(f.due(1000));
+    Flow g;
+    g.onStart(201, "{\"userCode\":\"AAAA-BBBB\",\"pollToken\":\"t\",\"interval\":1}", 0);
+    TEST_ASSERT_FALSE(g.preApproved());
+    TEST_ASSERT_FALSE(g.due(1999)); // a plain code never polls faster than 2 s
+}
+
+void test_heartbeat_answer(void) {
+    HeartbeatAnswer a;
+    TEST_ASSERT_TRUE(parseHeartbeat("{\"ok\":true,\"zabbix\":{\"server\":\"z.example\",\"port\":10052,\"host\":\"tc-1\"},\"next\":\"sending\"}", a));
+    TEST_ASSERT_TRUE(a.known);
+    TEST_ASSERT_EQUAL_STRING("z.example", a.zabbix.server.c_str());
+    TEST_ASSERT_EQUAL_UINT16(10052, a.zabbix.port);
+    TEST_ASSERT_EQUAL_STRING("tc-1", a.zabbix.host.c_str());
+    TEST_ASSERT_EQUAL_STRING("sending", a.next.c_str());
+    TEST_ASSERT_TRUE(parseHeartbeat("{\"ok\":true,\"zabbix\":null,\"next\":\"plan\"}", a));
+    TEST_ASSERT_TRUE(a.known);
+    TEST_ASSERT_TRUE(a.zabbix.empty());
+    TEST_ASSERT_EQUAL_STRING("plan", a.next.c_str());
+    // An older cloud says nothing about Zabbix: keep what there is
+    TEST_ASSERT_TRUE(parseHeartbeat("{\"ok\":true}", a));
+    TEST_ASSERT_FALSE(a.known);
+    TEST_ASSERT_FALSE(parseHeartbeat("not json", a));
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_start_body);
@@ -139,5 +187,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_refused_start_backs_off);
     RUN_TEST(test_restore_and_reset);
     RUN_TEST(test_heartbeat_body);
+    RUN_TEST(test_approved_without_zabbix_yet);
+    RUN_TEST(test_pre_approved_start_polls_soon);
+    RUN_TEST(test_heartbeat_answer);
     return UNITY_END();
 }

@@ -13,7 +13,7 @@
 #include <time.h>
 
 #ifndef CLOUD_URL
-#define CLOUD_URL "https://bridge.connect.tescom.gr"
+#define CLOUD_URL "https://connect.tescom.gr"
 #endif
 #ifndef CLOUD_TENANT
 #define CLOUD_TENANT "tescom"
@@ -25,6 +25,8 @@
 namespace {
 
 const char* NVS_NAMESPACE = "cloud";
+// Written at the factory (scripts/stick_qr.py): the secret the QR code on the stick and its box carries
+const char* FACTORY_NAMESPACE = "factory";
 const uint32_t HEARTBEAT_MS = 30000;
 const int HTTP_TIMEOUT_MS = 15000;
 // Answers are small JSON; the claim's credentials are the largest (two PEMs, a JWT)
@@ -128,6 +130,10 @@ String CloudClient::statusJson() const {
             doc["deviceId"] = c.device_id;
             doc["name"] = c.name;
             doc["organization"] = c.organization;
+            // What the owner still has to do in Tescom Connect ("ups", "plan"), and where
+            doc["next"] = c.next.size() ? c.next : (c.zabbix().empty() ? "ups" : "sending");
+            doc["manageUrl"] = c.manage_url.size() ? c.manage_url : (std::string(CLOUD_URL) + "/?stick=" + c.device_id);
+            doc["sending"] = !c.zabbix().empty();
             doc["heartbeatOk"] = _heartbeat_sent && _heartbeat_error.length() == 0;
             if (_heartbeat_sent && _heartbeat_error.length() == 0) doc["lastHeartbeatAgoS"] = (now - _heartbeat_ok_ms) / 1000;
             if (_heartbeat_error.length()) doc["lastError"] = _heartbeat_error;
@@ -202,6 +208,7 @@ void CloudClient::claimStep(uint32_t now) {
         req.mac = mac().c_str();
         req.fw_version = FIRMWARE_VERSION;
         req.csr_pem = StickIdentity::csrPem(mac());
+        req.secret = factorySecret().c_str();
         {
             auto data = _ups->getUPSData();
             req.model = data->get("ups.model").c_str();
@@ -217,7 +224,10 @@ void CloudClient::claimStep(uint32_t now) {
         if (status < 0) {
             _flow.onNetworkError(error.c_str(), millis());
         } else if (_flow.onStart(status, out, millis())) {
-            AppLogger::log("INFO", "[CLOUD] Code %s: approve it at %s", _flow.userCode().c_str(), _flow.verifyUrl().c_str());
+            if (_flow.preApproved())
+                AppLogger::log("INFO", "[CLOUD] Already in a Tescom Connect account (its QR code): picking up the credentials");
+            else
+                AppLogger::log("INFO", "[CLOUD] Code %s: approve it at %s", _flow.userCode().c_str(), _flow.verifyUrl().c_str());
         } else {
             AppLogger::log("WARN", "[CLOUD] No code from the cloud: %s", _flow.lastError().c_str());
         }
@@ -258,10 +268,34 @@ void CloudClient::heartbeat() {
     _last_heartbeat = millis();
     _heartbeat_sent = true;
     if (code == 200) {
-        Guard g(_mutex);
-        if (_heartbeat_error.length()) AppLogger::log("INFO", "[CLOUD] Heartbeat works again");
-        _heartbeat_error = "";
-        _heartbeat_ok_ms = millis();
+        StickClaim::HeartbeatAnswer answer;
+        bool read = StickClaim::parseHeartbeat(out, answer);
+        StickClaim::Credentials changed;
+        bool zabbix_changed = false;
+        {
+            Guard g(_mutex);
+            if (_heartbeat_error.length()) AppLogger::log("INFO", "[CLOUD] Heartbeat works again");
+            _heartbeat_error = "";
+            _heartbeat_ok_ms = millis();
+            if (read) {
+                StickClaim::Credentials c = _flow.credentials();
+                zabbix_changed = answer.known && answer.zabbix != c.zabbix();
+                if (answer.known) c.setZabbix(answer.zabbix);
+                if (answer.next.size()) c.next = answer.next;
+                _flow.restore(c);
+                changed = c;
+            }
+        }
+        // Readings start when the owner's UPS is added and on a plan, and stop when it no longer is
+        if (zabbix_changed) {
+            saveCredentials(changed);
+            applyCredentials(changed);
+            if (changed.zabbix().empty())
+                AppLogger::log("INFO", "[CLOUD] Not sending readings: %s",
+                               changed.next == "plan" ? "the UPS needs a cloud plan" : "the UPS is not added in Tescom Connect yet");
+            else
+                AppLogger::log("INFO", "[CLOUD] Sending readings to %s as %s", changed.zabbix_server.c_str(), changed.zabbix_host.c_str());
+        }
         return;
     }
     // The device was removed in the cloud, or its token no longer valid: link again
@@ -278,6 +312,10 @@ void CloudClient::heartbeat() {
 
 void CloudClient::applyCredentials(const StickClaim::Credentials& c) {
     if (!_zabbix) return;
+    if (c.zabbix().empty()) {
+        _zabbix->clearManaged();
+        return;
+    }
     ZabbixClient::Managed m;
     m.server = c.zabbix_server;
     m.port = c.zabbix_port;
@@ -302,6 +340,8 @@ bool CloudClient::loadCredentials(StickClaim::Credentials& c) {
     c.ca_pem = p.getString("ca", "").c_str();
     c.server_ca_pem = p.getString("sca", "").c_str();
     c.cert_pem = p.getString("cert", "").c_str();
+    c.next = p.getString("next", "").c_str();
+    c.manage_url = p.getString("murl", "").c_str();
     p.end();
     return c.complete();
 }
@@ -310,15 +350,33 @@ bool CloudClient::saveCredentials(const StickClaim::Credentials& c) {
     Preferences p;
     if (!p.begin(NVS_NAMESPACE, false)) return false;
     bool ok = p.putString("did", c.device_id.c_str()) && p.putString("tok", c.agent_token.c_str()) &&
-              p.putString("zsrv", c.zabbix_server.c_str()) && p.putUShort("zport", c.zabbix_port) &&
-              p.putString("zhost", c.zabbix_host.c_str()) && p.putString("sca", c.server_ca_pem.c_str()) &&
-              p.putString("cert", c.cert_pem.c_str());
-    // Shown only; an empty name or CA is fine
-    p.putString("name", c.name.c_str());
-    p.putString("org", c.organization.c_str());
-    p.putString("ca", c.ca_pem.c_str());
+              p.putString("sca", c.server_ca_pem.c_str()) && p.putString("cert", c.cert_pem.c_str());
+    // Empty until the cloud says where readings go (putString of "" writes nothing, so remove)
+    auto put = [&p](const char* key, const std::string& v) {
+        if (v.empty())
+            p.remove(key);
+        else
+            p.putString(key, v.c_str());
+    };
+    put("zsrv", c.zabbix_server);
+    put("zhost", c.zabbix_host);
+    p.putUShort("zport", c.zabbix_port);
+    // Shown only
+    put("name", c.name);
+    put("org", c.organization);
+    put("ca", c.ca_pem);
+    put("next", c.next);
+    put("murl", c.manage_url);
     p.end();
     return ok;
+}
+
+std::string CloudClient::factorySecret() {
+    Preferences p;
+    if (!p.begin(FACTORY_NAMESPACE, true)) return "";
+    std::string s = p.getString("qr", "").c_str();
+    p.end();
+    return s;
 }
 
 void CloudClient::eraseCredentials() {

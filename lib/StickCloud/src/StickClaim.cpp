@@ -43,6 +43,7 @@ std::string startBody(const StartRequest& r) {
     if (!r.model.empty()) doc["model"] = r.model;
     if (!r.fw_version.empty()) doc["fwVersion"] = r.fw_version;
     doc["csr"] = r.csr_pem;
+    if (!r.secret.empty()) doc["secret"] = r.secret;
     std::string out;
     serializeJson(doc, out);
     return out;
@@ -68,6 +69,28 @@ std::string heartbeatBody(const std::string& fw_version, uint64_t started_at_ms,
     std::string out;
     serializeJson(doc, out);
     return out;
+}
+
+namespace {
+ZabbixTarget zabbixOf(JsonVariantConst z) {
+    ZabbixTarget t;
+    if (!z.is<JsonObjectConst>()) return t;
+    t.server = field(z["server"]);
+    t.port = z["port"] | 10051;
+    t.host = field(z["host"]);
+    return t;
+}
+} // namespace
+
+bool parseHeartbeat(const std::string& body, HeartbeatAnswer& out) {
+    out = HeartbeatAnswer();
+    JsonDocument doc;
+    if (deserializeJson(doc, body)) return false;
+    out.next = field(doc["next"]);
+    if (doc["zabbix"].isUnbound()) return true;
+    out.known = true;
+    out.zabbix = zabbixOf(doc["zabbix"]);
+    return true;
 }
 
 uint32_t Flow::expiresInS(uint32_t now) const {
@@ -124,8 +147,10 @@ bool Flow::onStart(int http_status, const std::string& body, uint32_t now) {
     _verify_url = field(doc["verifyUrl"]);
     _poll_token = field(doc["pollToken"]);
     uint32_t interval_s = doc["interval"] | 5;
-    if (interval_s < 2) interval_s = 2;
+    if (interval_s < 2) interval_s = 2;  // the cloud's own 1 s is only for a pre-approved stick
     uint32_t ttl_s = doc["expiresIn"] | 900;
+    _pre_approved = doc["approved"] | false;
+    if (_pre_approved) interval_s = 1;
     _interval_ms = interval_s * 1000;
     _expires_at = now + ttl_s * 1000;
     _next_at = now + _interval_ms;
@@ -175,9 +200,9 @@ bool Flow::onPoll(int http_status, const std::string& body, uint32_t now) {
     c.name = field(doc["name"]);
     c.organization = field(doc["organization"]);
     c.agent_token = field(doc["agentToken"]);
-    c.zabbix_server = field(doc["zabbix"]["server"]);
-    c.zabbix_port = doc["zabbix"]["port"] | 10051;
-    c.zabbix_host = field(doc["zabbix"]["host"]);
+    c.setZabbix(zabbixOf(doc["zabbix"]));
+    c.next = field(doc["next"]);
+    c.manage_url = field(doc["manageUrl"]);
     c.ca_pem = field(doc["tls"]["ca"]);
     c.server_ca_pem = field(doc["tls"]["serverCa"]);
     c.cert_pem = field(doc["tls"]["cert"]);
