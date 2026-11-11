@@ -183,7 +183,7 @@ What is built (2026-11-11):
   drops off the setup network for a moment (it usually rejoins; the page keeps
   polling). On iPhones the captive-portal sheet may close when the setup
   network goes away; the page says to note the code, and the code also stays
-  in the stick's web UI and in the desktop app's reach once it is on the LAN.
+  in the stick's web UI and on `GET /api/claim` once it is on the LAN.
   A wrong Wi-Fi password: after 60 s the stick restarts as before and keeps
   trying; pressing reset twice opens the setup network again.
 - **Factory**: `scripts/stick_qr.py MAC` gives the secret, the QR link and an
