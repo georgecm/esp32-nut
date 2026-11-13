@@ -313,6 +313,39 @@ The serial number joins the factory list the cloud already checks
   board's IN-OUT pads, or use a powered OTG adapter). Once the firmware runs,
   that port no longer shows a serial device; logs and flashing move to the
   UART USB-C port (or BOOT + RESET for the ROM loader on the native port).
+- Power: the lower (UART) USB-C port, from a USB charger plugged into one of the
+  UPS's own outlets, so the stick keeps running through a power cut (the router
+  must be on the UPS too for readings to get out). Where the outlet is needed,
+  a pass-through Schuko adapter with USB ports keeps the socket; on IEC C13
+  outlets, a C14-to-Schuko cord to a small strip with USB. The UPS's USB-B port
+  never gives power: it is a device port and expects 5 V from the host, which
+  here is the stick. A power bank works for a while (about 0.5 W, so 2-3 days
+  on 10,000 mAh) but many switch off at such a low load.
+
+## Later hardware: 4G stick with battery backup
+
+A second hardware version for sites with no Wi-Fi, or where the router is not
+on the UPS, and for running a while with no mains at all.
+
+- Modem over UART (the native USB port stays the UPS port). LTE-M / NB-IoT
+  (SIM7080G) is cheap, low power and enough for UPS readings; full 4G
+  (SIM7600, A7670E) where LTE-M is not covered. Ready boards with the
+  ESP32-S3 and the modem: LilyGO T-SIM7080G-S3 (PMU, 18650 holder, solar input
+  4.4-6 V), T-A7670.
+- Battery backup: an 18650 (or LiPo) with its own charger/PMU, so the stick
+  keeps reporting when the UPS itself is off or flat, and can say so. Report
+  the stick's own battery and mains state as Zabbix items.
+- Power: modem bursts reach about 2 A; it needs its own 5 V / battery rail
+  and a large capacitor, never the board's 3.3 V pin, or it resets the ESP32.
+  Users report the LilyGO 7080G board not starting on charger + battery
+  together: check before choosing it.
+- Firmware: arduino-esp32 3.x / ESP-IDF `esp_modem` bring the modem up as a
+  PPP network interface, so the claim, heartbeat, HTTPS and Zabbix TLS stay as
+  they are. New: pick Wi-Fi or 4G (Wi-Fi first, 4G as fallback), SIM PIN and
+  APN in the setup page, signal strength and the stick's battery in the
+  status and Zabbix.
+- SIM: an M2M/IoT data SIM; readings every minute are a few MB a month.
+- Own board profile and env (`tescom-stick-4g`), own model in the factory list.
 
 ## Needs a real UPS
 
@@ -346,3 +379,4 @@ The serial number joins the factory list the cloud already checks
    check, per-unit setup password on the label.
 8. Prime: CH34x VCP host source and Modbus port of `tescom_prime.c`.
 9. LiON RT `krauler` mode.
+10. Later hardware: 4G stick with battery backup (above).
