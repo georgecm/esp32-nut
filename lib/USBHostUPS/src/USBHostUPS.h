@@ -19,6 +19,8 @@
 #include "DescriptorRetry.h"
 #include "OnlineDischargeLog.h"
 #include "DriverVarStore.h"
+#include "Ch340Host.h"
+#include "ISerialPort.h"
 #include <map>
 #include <vector>
 
@@ -45,6 +47,13 @@ class IUPSDriver;
  *   protects UPSData, the parser and the report cache against the readers.
  * - _op_mutex serialises the control requests of the other tasks (setBeeper) with a
  *   poll iteration. Lock order: _op_mutex, then _mutex.
+ *
+ * Serial UPSes (the Tescom Prime): a CH340 USB-serial bridge (DriverRegistry::isSerial) is
+ * not HID. Ch340Host, a second client of the same usb_host library, takes it; its
+ * connect/disconnect events go through _event_queue like the HID ones, and the poll task
+ * binds the serial driver (PrimeDriver) to it instead of a HID interface. One UPS at a
+ * time: whichever is bound first keeps the port. The serial path shares _link, the stale
+ * logic and _ups_data with the HID one; a Modbus request with no reply is a link failure.
  */
 class USBHostUPS : public IUSBHostUPS {
 public:
@@ -131,7 +140,8 @@ private:
     void applySavedDriverValues();
 
     struct HidEvent {
-        enum Type : uint8_t { CONNECTED, OPEN_FAILED, INPUT_REPORT, DISCONNECTED, TRANSFER_ERROR };
+        enum Type : uint8_t { CONNECTED, OPEN_FAILED, INPUT_REPORT, DISCONNECTED, TRANSFER_ERROR,
+                              SERIAL_CONNECTED, SERIAL_GONE };
         Type type;
         uint16_t length;
         uint32_t ts; // millis() when the HID task received it
@@ -192,6 +202,30 @@ private:
     bool setBeeperLocked(bool enable, const HIDUsageDef* field = nullptr);
     bool writeUsageLocked(const HIDUsageDef& def, uint32_t value); // _op_mutex held
     void log(const char* level, const char* fmt, ...) const;
+
+    // Serial UPS behind the CH340 (Tescom Prime), poll task context but ch340_event_cb
+    static void ch340_event_cb(Ch340Host::Event event, void* arg); // client task: posts only
+    void claimSerial();
+    void handleSerialGone();
+    void serviceSerial(uint32_t now);
+    void recoverSerial(uint32_t now);
+    void noteSerialExchange(bool answered);
+    // Link monitor of the serial path: a silent Modbus UPS turns the data stale and the
+    // CH340 is set up again every linkTimeoutMs, without climbing to a system restart
+    static LinkMonitor::Config serialLinkConfig();
+
+    // The CH340 as the serial driver's ISerialPort, with the link accounting of the host
+    class SerialLink : public ISerialPort {
+    public:
+        explicit SerialLink(USBHostUPS& owner) : _owner(owner) {}
+        bool write(const uint8_t* data, size_t len) override;
+        size_t read(uint8_t* buf, size_t len, uint32_t timeout_ms) override;
+        void flushInput() override;
+        void sleepMs(uint32_t ms) override;
+        void noteExchange(bool answered) override { _owner.noteSerialExchange(answered); }
+    private:
+        USBHostUPS& _owner;
+    };
 
     QueueHandle_t _event_queue;
     // Interface being closed by the loopTask: its synchronous DISCONNECTED is not queued
@@ -255,6 +289,14 @@ private:
     uint32_t _quirks;
     uint32_t _peripheral_map = 0;
     uint8_t _request_buffer[256];
+
+    Ch340Host _ch340;
+    SerialLink _serial_link{*this};
+    bool _ch340_started = false;
+    // The serial driver is bound to the CH340 (no HID interface then)
+    bool _serial_bound = false;
+    // The poll task is under the task watchdog: SerialLink feeds it during a long request
+    volatile bool _poll_wdt = false;
 };
 
 #endif // USB_HOST_UPS_H

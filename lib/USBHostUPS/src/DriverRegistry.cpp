@@ -9,6 +9,7 @@
 #include "MegatecDriver.h"
 #include "OpenUPSDriver.h"
 #include "PowercomDriver.h"
+#include "PrimeDriver.h"
 #include <string.h>
 
 namespace {
@@ -58,6 +59,17 @@ const DriverEntry DRIVERS[] = {
 
 bool DriverRegistry::isQx(uint16_t vid, uint16_t pid) {
     return vid == NONAME0001_VENDORID && pid == 0x0000;
+}
+
+bool DriverRegistry::isSerial(uint16_t vid, uint16_t pid) {
+    // nut-app profiles/prime.conf: 1a86:7523 is a common chip other serial adapters use too,
+    // so the ID alone does not say it is a Prime; nothing else is read through it here
+    return vid == 0x1A86 && pid == 0x7523;
+}
+
+IUPSDriver* DriverRegistry::createSerial(uint16_t vid, uint16_t pid, ISerialPort* port) {
+    if (!port || !isSerial(vid, pid)) return nullptr;
+    return new PrimeDriver(port);
 }
 
 IUPSDriver* DriverRegistry::create(uint16_t vid, uint16_t pid, const char* mfr, const char* product) {

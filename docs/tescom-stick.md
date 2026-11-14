@@ -17,6 +17,7 @@ Status: 2026-11-11. Nothing here has run against a real UPS yet.
 | Piece | Where | Verified |
 | --- | --- | --- |
 | Megatec Q1 over the MEC0003 bridge (`hunnox`, `fabula`) | `lib/USBHostUPS/src/Megatec*` | Native tests only |
+| Tescom Prime: CH340 serial host on the `usb_host` library next to the HID driver, Modbus RTU master and `PrimeDriver`, a port of nut-app's `tescom_prime.c` reads (`driver.name = tescom_prime`, `prime` profile); reads only, no instant commands yet | `lib/USBHostUPS/src/Ch340*`, `ModbusRtu.*`, `Prime*`, `USBHostUPS.cpp` (serial path) | Builds; native tests (`test_prime_driver`) with the register values of nut-app `docs/PRIME-MODBUS.md`; not yet run on a Prime |
 | Model detection from the shared profiles | `lib/USBHostUPS/src/UpsProfiles*`, `scripts/gen_profiles.py` | Native tests only |
 | `esp32-s3-n16r8` env (16MB flash, octal PSRAM) | `platformio.ini` | Builds; not flashed yet |
 | `tescom-stick` env: board profile, hostname `tescom-stick-xxxxxx`, NUT description `Tescom stick (<model>)`, mDNS `_nut._tcp` with model TXT | `src/board/tescom_stick.cpp`, `src/network/mdns_announcer.*` | Builds; not flashed yet |
@@ -357,7 +358,7 @@ on the UPS, and for running a while with no mains at all.
 | Charge estimate on battery against the Pi's NUT readings | LEO or Smartbox, power cut |
 | Status bits OL/OB/LB during a power cut | Any of them |
 | `krauler` + warm-up for the LiON RT (not written yet) | LiON RT |
-| CH34x serial host + Modbus for the Prime (not written yet) | Prime 1102 XL |
+| CH340 serial host + Modbus for the Prime (built and unit-tested, not yet run on a Prime): the CH340 enumerates and is claimed next to the HID driver, chip set-up (version, 9600 8N1, DTR on / RTS off) taken, readings match the Pi's `tescom_prime`, `DATA-STALE` when the Prime is switched off | Prime 1102 XL |
 | 5 V VBUS from the board's pads under the UPS's load | Any UPS |
 | App finds the stick by its 3493 scan, reads, shows the model | Any UPS + app |
 | Claim on the board: key and CSR made by mbedTLS accepted by the cloud, HTTPS to connect.tescom.gr with the certificate bundle, Zabbix switched on by the heartbeat, TLS to zabbix.metagr.id with the stick's certificate | The board on Wi-Fi with internet, the Connect Worker deployed (staging) |
@@ -377,6 +378,7 @@ on the UPS, and for running a while with no mains at all.
 6. Signed OTA (app-level).
 7. ~~Factory flashing script and label~~ (done, dry run only); left: UART
    check, per-unit setup password on the label.
-8. Prime: CH34x VCP host source and Modbus port of `tescom_prime.c`.
+8. Prime: ~~CH340 host and Modbus port of `tescom_prime.c` (reads)~~ (built,
+   not on hardware); left: run it on a Prime, then the instant commands.
 9. LiON RT `krauler` mode.
 10. Later hardware: 4G stick with battery backup (above).

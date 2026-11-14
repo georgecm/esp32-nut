@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 class IUPSDriver;
+class ISerialPort;
 
 /**
  * @brief Driver selection by USB VID/PID (review S3).
@@ -22,6 +23,13 @@ namespace DriverRegistry {
 
     // A Q* (nutdrv_qx) bridge: a HID device without UPS usages that a Q* driver reads
     bool isQx(uint16_t vid, uint16_t pid);
+
+    // A UPS behind a USB-serial bridge that USBHostUPS reads over its own serial host
+    // instead of HID: the CH340 (1a86:7523) of the Tescom Prime
+    bool isSerial(uint16_t vid, uint16_t pid);
+    // New driver for a serial device (isSerial), reading through port; owned by the caller,
+    // nullptr when the device is not one
+    IUPSDriver* createSerial(uint16_t vid, uint16_t pid, ISerialPort* port);
 }
 
 #endif // DRIVER_REGISTRY_H

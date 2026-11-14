@@ -116,6 +116,13 @@ bool USBHostUPS::begin() {
         return false;
     }
 
+    // Serial UPSes (CH340 of the Tescom Prime): a second usb_host client. Without it the
+    // HID path still works, so a failure is only logged
+    if (!_ch340_started) {
+        _ch340_started = _ch340.begin(DriverRegistry::isSerial, USBHostUPS::ch340_event_cb, this);
+        if (!_ch340_started) log("WARN", "[USB] CH340 serial host not started: serial UPSes not read");
+    }
+
     if (!_poll_task_handle) {
         _poll_task_run = true;
         if (xTaskCreatePinnedToCore(USBHostUPS::poll_task, "ups_poll", POLL_TASK_STACK, this,
@@ -136,6 +143,7 @@ void USBHostUPS::poll_task(void *arg) {
     // Under the task watchdog like the loopTask: a hang becomes a panic with a backtrace.
     // An iteration blocks at most for a few control transfer timeouts.
     bool wdt = esp_task_wdt_add(NULL) == ESP_OK;
+    self->_poll_wdt = wdt;
     if (!wdt) self->log("WARN", "[USB] Poll task not under the task watchdog");
 #if defined(NUT_TEST_TWDT_HANG) && NUT_TEST_TWDT_HANG
     // US-110 test build only (PLATFORMIO_BUILD_FLAGS=-DNUT_TEST_TWDT_HANG=1): 60 s after
@@ -183,6 +191,11 @@ void USBHostUPS::end() {
     if (_desc_retry_handle) {
         closeInterface(_desc_retry_handle);
         clearDeferredClaim(_desc_retry_handle);
+    }
+    if (_ch340_started) {
+        _ch340.end();
+        _ch340_started = false;
+        _serial_bound = false;
     }
 
     hid_host_uninstall();
@@ -288,6 +301,11 @@ void USBHostUPS::service() {
 
     if (_restart_requested) return;
 
+    if (_serial_bound) {
+        serviceSerial(now);
+        return;
+    }
+
     if (_in_restart_pending) {
         retryInterfaceStart(now);
         return;
@@ -372,6 +390,12 @@ void USBHostUPS::processEvents() {
         case HidEvent::DISCONNECTED:
             handleDisconnected(ev.handle);
             break;
+        case HidEvent::SERIAL_CONNECTED:
+            claimSerial();
+            break;
+        case HidEvent::SERIAL_GONE:
+            handleSerialGone();
+            break;
         case HidEvent::TRANSFER_ERROR:
             if (ev.handle == _hid_dev_handle && (_quirks & QUIRK_NO_INTERRUPT_PIPE)) {
                 // US-108: upstream never reads this pipe (usbhid-ups.c:1432), so its errors
@@ -396,6 +420,13 @@ void USBHostUPS::processEvents() {
 }
 
 void USBHostUPS::claimInterface(hid_host_device_handle_t handle) {
+    if (_serial_bound) {
+        // One UPS at a time: the serial one came first
+        log("INFO", "[USB] HID interface ignored: a serial UPS is bound");
+        clearDeferredClaim(handle);
+        closeInterface(handle);
+        return;
+    }
     size_t desc_len = 0;
     uint8_t *desc = hid_host_get_report_descriptor(handle, &desc_len);
 
@@ -489,6 +520,7 @@ void USBHostUPS::claimInterface(hid_host_device_handle_t handle) {
         applyDefaultDelays();
     }
 
+    _link = LinkMonitor(); // the default ladder (a serial UPS before may have left its own)
     _link.reset(millis());
     if (_quirks & QUIRK_NO_INTERRUPT_PIPE) {
         // upslogx(LOG_INFO, "interrupt pipe disabled ...") of apc-hid.c:51-62 (US-108)
@@ -1354,3 +1386,173 @@ void USBHostUPS::populateStringsFromDeviceInfo(const hid_host_dev_info_t& dev_in
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Serial UPS behind the CH340 (Tescom Prime)
+// ---------------------------------------------------------------------------
+
+void USBHostUPS::ch340_event_cb(Ch340Host::Event event, void* arg) {
+    // Ch340Host client task: never blocks, the poll task does the rest
+    USBHostUPS* self = static_cast<USBHostUPS*>(arg);
+    HidEvent ev = {};
+    ev.type = event == Ch340Host::Event::CONNECTED ? HidEvent::SERIAL_CONNECTED : HidEvent::SERIAL_GONE;
+    ev.ts = millis();
+    self->postEvent(ev, true);
+}
+
+LinkMonitor::Config USBHostUPS::serialLinkConfig() {
+    LinkMonitor::Config cfg = LinkMonitor::defaultConfig();
+    // A Prime that does not answer may simply be off, with its CH340 still powered from the
+    // stick: set the chip up again every linkTimeoutMs instead of restarting after two tries.
+    // (The counter is a uint8_t: 255 recoveries, about 4 h of silence, still end in a restart)
+    cfg.maxRecoveries = 255;
+    return cfg;
+}
+
+void USBHostUPS::claimSerial() {
+    if (_hid_dev_handle != NULL) {
+        log("WARN", "[USB] Serial UPS %04X:%04X ignored: a HID UPS is bound", _ch340.vid(), _ch340.pid());
+        _ch340.close();
+        return;
+    }
+    if (_serial_bound) return;
+    // Claim and chip set-up: blocking control transfers, no application lock held (ADR 0008)
+    if (!_ch340.open(9600)) {
+        log("ERROR", "[USB] CH340 %04X:%04X not set up: serial UPS dropped", _ch340.vid(), _ch340.pid());
+        _ch340.close();
+        return;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    _vid = _ch340.vid();
+    _pid = _ch340.pid();
+    _quirks = 0;
+    _hid_parser = HIDParser();
+    _cached_reports.clear();
+    _cached_report_descriptor_hex = "";
+    _device_product = "";
+    if (_driver) { delete _driver; _driver = nullptr; }
+    _driver = DriverRegistry::createSerial(_vid, _pid, &_serial_link);
+    if (!_driver) {
+        log("ERROR", "[USB] No serial driver for %04X:%04X", _vid, _pid);
+        _ch340.close();
+        return;
+    }
+    _driver->setup();
+    applySavedDriverValues();
+    applyDefaultDelays();
+
+    _serial_bound = true;
+    _link = LinkMonitor(serialLinkConfig());
+    _link.reset(millis());
+    _in_wd.reset(millis()); // never fed: no INPUT reports on this path
+    _in_reasm.reset();
+    _ep_in_mps = 0;
+    _uses_report_ids = false;
+    _iManufacturer = _iProduct = _iSerialNumber = 0;
+    _in_restart_pending = false;
+    _in_recoveries = 0;
+    // Stale until the first full poll, as on the HID path (issue #60)
+    _first_data_ready = false;
+    _claimed_at = millis();
+    _get_ok_since_claim = 0;
+    if (_restart_requested) {
+        log("INFO", "[USB] UPS enumerated again: restart request cancelled");
+        _restart_requested = false;
+        _restart_reason = "";
+    }
+    _is_ready_to_poll = true;
+    log("INFO", "[USB] Serial UPS %04X:%04X claimed: CH340 version 0x%02X, Modbus RTU 9600 8N1 (%s)",
+        _vid, _pid, _ch340.version(), _driver->getDriverName());
+}
+
+void USBHostUPS::handleSerialGone() {
+    _ch340.close();
+    if (!_serial_bound) return;
+
+    log("INFO", "[USB] Serial UPS disconnected");
+    std::lock_guard<std::recursive_mutex> lock(_mutex);
+    _serial_bound = false;
+    _is_ready_to_poll = false;
+    _ups_data = UPSData();
+    _device_product = "";
+    if (_driver) { delete _driver; _driver = nullptr; }
+    _ol_dischrg_log = OnlineDischargeLog();
+}
+
+void USBHostUPS::serviceSerial(uint32_t now) {
+    if (!_is_ready_to_poll || !_driver) return;
+
+    switch (_link.tick(now, false)) {
+    case LinkMonitor::Action::RECOVER:
+        recoverSerial(now);
+        return;
+    case LinkMonitor::Action::RESTART:
+        requestRestart("serial UPS not answering after recovery");
+        return;
+    default:
+        break;
+    }
+
+    // One Modbus request per call (PrimeDriver), each at most TRIES x 1.65 s
+    _driver->loop(this, _ups_data, now);
+    logOnlineDischarge(now);
+
+    if (!_first_data_ready) {
+        bool done = false;
+        if (_driver->initialPollDone()) {
+            std::lock_guard<std::recursive_mutex> lock(_mutex);
+            done = UPSData::computeUPSStatusString(_ups_data) != "Unknown";
+        }
+        if (done || (now - _claimed_at) >= FIRST_DATA_MAX_MS) {
+            _first_data_ready = true;
+            log(done ? "INFO" : "WARN", "[USB] First full poll %s after %u ms: data served",
+                done ? "done" : "not done", (unsigned)(now - _claimed_at));
+        }
+    }
+}
+
+void USBHostUPS::recoverSerial(uint32_t now) {
+    log("WARN", "[USB] Serial UPS not answering: setting the CH340 up again");
+    if (!_ch340.reinit()) {
+        // The bridge itself does not take control requests: only a bus reset frees it
+        requestRestart("CH340 not answering");
+        return;
+    }
+    if (_driver) {
+        _driver->setup(); // restart the poll cycle from scratch
+        applySavedDriverValues();
+    }
+}
+
+void USBHostUPS::noteSerialExchange(bool answered) {
+    uint32_t now = millis();
+    if (answered) {
+        if (_link.failures() > 0) log("INFO", "[USB] Serial UPS answering again");
+        _link.onAlive(now);
+        _stat_get_ok++;
+        _get_ok_since_claim++;
+    } else {
+        _link.onLinkFailure(now);
+        _stat_get_failed++;
+    }
+}
+
+bool USBHostUPS::SerialLink::write(const uint8_t* data, size_t len) {
+    return _owner._ch340.write(data, len, Ch340Host::WRITE_TIMEOUT_MS);
+}
+
+size_t USBHostUPS::SerialLink::read(uint8_t* buf, size_t len, uint32_t timeout_ms) {
+    // A request with its retries can take ~5 s, the task watchdog's timeout: fed per read
+    if (_owner._poll_wdt) esp_task_wdt_reset();
+    return _owner._ch340.read(buf, len, timeout_ms);
+}
+
+void USBHostUPS::SerialLink::flushInput() {
+    _owner._ch340.flushInput();
+}
+
+void USBHostUPS::SerialLink::sleepMs(uint32_t ms) {
+    if (_owner._poll_wdt) esp_task_wdt_reset();
+    vTaskDelay(pdMS_TO_TICKS(ms));
+}
