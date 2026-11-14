@@ -65,6 +65,42 @@
       "tested": "not confirmed here; copied from the server's ups.conf of 2026-10-27"
     },
     {
+      "key": "neoline",
+      "model": "Tescom Neoline",
+      "link": "USB",
+      "usbId": "0001:0000",
+      "driver": "nutdrv_qx",
+      "subdriver": "hunnox",
+      "options": {
+        "vendorid": "0001",
+        "productid": "0000",
+        "protocol": "megatec",
+        "langid_fix": "0x0409",
+        "novendor": true,
+        "noscanlangid": true,
+        "battery_voltage_reports_one_pack": true,
+        "override.battery.packs": "12",
+        "pollfreq": "2",
+        "default.battery.voltage.high": "26.0",
+        "default.battery.voltage.low": "20.8"
+      },
+      "match": [
+        [
+          "driver",
+          "nutdrv_qx"
+        ],
+        [
+          "subdriver",
+          "hunnox"
+        ],
+        [
+          "ups.type",
+          "online"
+        ]
+      ],
+      "tested": "2026-11-05 on a Mac, NUT 2.8.4: a Neoline RT (readings, the TEST button, power cuts: OL, OB, OL) and a tower Neoline 1101S (readings)"
+    },
+    {
       "key": "prime",
       "model": "Tescom Prime",
       "link": "Serial",
@@ -80,7 +116,7 @@
           "tescom_prime"
         ]
       ],
-      "tested": "driver built and bundled 2026-11-03, not yet run against the UPS; registers read from one Prime 1102 XL (docs/PRIME-MODBUS.md)"
+      "tested": "2026-11-12 on a Mac (NUT 2.8.4) and 2026-11-13 on a Raspberry Pi (NUT 2.8.5), one Prime 1102 XL: readings, quick and timed tests, stop, output off/on (bypass) (docs/PRIME-MODBUS.md)"
     },
     {
       "key": "smartbox",

@@ -39,6 +39,24 @@ inline const Setting lion_options[] = {
 inline const Setting lion_match[] = {
     { "driver", "nutdrv_qx_mec" },
 };
+inline const Setting neoline_options[] = {
+    { "vendorid", "0001" },
+    { "productid", "0000" },
+    { "protocol", "megatec" },
+    { "langid_fix", "0x0409" },
+    { "novendor", "" },
+    { "noscanlangid", "" },
+    { "battery_voltage_reports_one_pack", "" },
+    { "override.battery.packs", "12" },
+    { "pollfreq", "2" },
+    { "default.battery.voltage.high", "26.0" },
+    { "default.battery.voltage.low", "20.8" },
+};
+inline const Setting neoline_match[] = {
+    { "driver", "nutdrv_qx" },
+    { "subdriver", "hunnox" },
+    { "ups.type", "online" },
+};
 inline const Setting prime_options[] = {
     { "pollinterval", "2" },
 };
@@ -62,10 +80,11 @@ inline const char MANUFACTURER[] = "Tescom";
 inline const Profile ALL[] = {
     { "leo", "Tescom Leo LCD", "USB", true, 0x0001, 0x0000, "nutdrv_qx", "hunnox", leo_options, 5, leo_match, 3 },
     { "lion", "Tescom LiON", "USB", true, 0x0001, 0x0000, "nutdrv_qx_mec", "krauler", lion_options, 15, lion_match, 1 },
+    { "neoline", "Tescom Neoline", "USB", true, 0x0001, 0x0000, "nutdrv_qx", "hunnox", neoline_options, 11, neoline_match, 3 },
     { "prime", "Tescom Prime", "Serial", true, 0x1a86, 0x7523, "tescom_prime", nullptr, prime_options, 1, prime_match, 1 },
     { "smartbox", "Tescom Leo SmartBox", "USB", true, 0x0001, 0x0000, "nutdrv_qx", "hunnox", smartbox_options, 5, smartbox_match, 3 },
 };
-inline const size_t COUNT = 4;
+inline const size_t COUNT = 5;
 
 } // namespace generated
 } // namespace UpsProfiles
