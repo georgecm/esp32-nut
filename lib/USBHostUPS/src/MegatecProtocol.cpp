@@ -130,11 +130,14 @@ bool parseF(const char* reply, UPSData& data) {
 }
 
 void estimateCharge(UPSData& data, double low, double high) {
-    if (!data.hasKey("battery.voltage.nominal") || !data.hasKey("battery.voltage")) return;
-    double nominal = data.getFloat("battery.voltage.nominal");
-    if (nominal <= 0) return;
-    if (low <= 0) low = 104 * nominal / 120;
-    if (high <= 0) high = 130 * nominal / 120;
+    if (!data.hasKey("battery.voltage")) return;
+    // The guess needs the nominal; a profile's limits do not (the Neoline reports none)
+    if (low <= 0 || high <= 0) {
+        double nominal = data.hasKey("battery.voltage.nominal") ? data.getFloat("battery.voltage.nominal") : 0;
+        if (nominal <= 0) return;
+        if (low <= 0) low = 104 * nominal / 120;
+        if (high <= 0) high = 130 * nominal / 120;
+    }
     if (high <= low) return;
     data.set("battery.voltage.low", format("%.2f", low));
     data.set("battery.voltage.high", format("%.2f", high));

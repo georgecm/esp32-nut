@@ -355,8 +355,123 @@ void test_driver_without_a_fitting_profile(void) {
     TEST_ASSERT_NULL(other.profile());
 }
 
+// The Neoline (profiles/neoline.conf): on-line, Q1 gives the voltage of one of its 12 cells,
+// F is all zeros for good
+static const char* NEOLINE_Q1 = "(230.0 230.0 230.0 012 50.0 2.29 31.0 00000001\r";
+static const char* NEOLINE_F = "#000.0 000 000.0 00.0\r";
+
+static void pollFor(MegatecDriver& driver, const char* q1, const char* f, int polls) {
+    driver.setup();
+    bridge.replies[0x03] = q1;
+    bridge.replies[0x0d] = f;
+    for (int i = 0; i < polls; i++) driver.loop(&bridge, data, 10000 + i * MegatecDriver::POLL_MS);
+}
+
+void test_driver_names_the_neoline_without_ratings(void) {
+    MegatecDriver driver;
+    // While F may still be a waking bridge, no model is guessed
+    pollFor(driver, NEOLINE_Q1, NEOLINE_F, MegatecDriver::F_TRIES_BEFORE_MATCH - 1);
+    TEST_ASSERT_NULL(driver.profile());
+    TEST_ASSERT_FALSE(data.hasKey("ups.model"));
+    driver.loop(&bridge, data, 10000 + MegatecDriver::F_TRIES_BEFORE_MATCH * MegatecDriver::POLL_MS);
+    TEST_ASSERT_NOT_NULL(driver.profile());
+    TEST_ASSERT_EQUAL_STRING("neoline", driver.profile()->key);
+    TEST_ASSERT_EQUAL_STRING("Neoline", data.get("ups.model").c_str());
+    TEST_ASSERT_EQUAL_STRING("online", data.get("ups.type").c_str());
+    // The cell voltage times 12, the profile's limits, and a charge without a nominal
+    TEST_ASSERT_EQUAL_STRING("27.48", data.get("battery.voltage").c_str());
+    TEST_ASSERT_EQUAL_STRING("20.80", data.get("battery.voltage.low").c_str());
+    TEST_ASSERT_EQUAL_STRING("26.00", data.get("battery.voltage.high").c_str());
+    TEST_ASSERT_EQUAL_STRING("100", data.get("battery.charge").c_str());
+    TEST_ASSERT_FALSE(data.hasKey("battery.voltage.nominal"));
+}
+
+void test_late_ratings_match_again(void) {
+    // A LEO whose bridge woke slowly: no model on the status alone, then the ratings name it
+    MegatecDriver driver;
+    pollFor(driver, LEO_Q1, NEOLINE_F, MegatecDriver::F_TRIES_BEFORE_MATCH + 2);
+    TEST_ASSERT_NULL(driver.profile());
+    bridge.replies[0x0d] = LEO_F;
+    driver.loop(&bridge, data, 60000);
+    TEST_ASSERT_NOT_NULL(driver.profile());
+    TEST_ASSERT_EQUAL_STRING("leo", driver.profile()->key);
+}
+
+void test_status_alone_never_names_a_leo(void) {
+    // A line-interactive LEO or SmartBox without ratings fits no profile: no wrong model
+    MegatecDriver driver;
+    pollFor(driver, LEO_Q1, NEOLINE_F, MegatecDriver::F_TRIES_BEFORE_MATCH + 2);
+    TEST_ASSERT_NULL(driver.profile());
+    TEST_ASSERT_FALSE(data.hasKey("ups.model"));
+}
+
+// The LiON RT (fake-upsd's dump of 27 Oct 2026): Q1 holds 1/48 of the pack; the bridge
+// answers krauler only, and krauler puts the prefix back over whatever first byte came
+static const char* LION_Q1_RAW = "?232.1 232.1 230.0 000 50.0 0.56 32.0 00000001\r";
+static const char* LION_F_RAW = "?230.0 004 024.0 50.0\r";
+
+void test_lion_answers_krauler_after_hunnox(void) {
+    MegatecDriver driver;
+    driver.setup();
+    // hunnox: no status (the bridge stays silent)
+    for (int i = 0; i < MegatecDriver::HUNNOX_POLLS_BEFORE_KRAULER; i++)
+        driver.loop(&bridge, data, 10000 + i * MegatecDriver::POLL_MS);
+    TEST_ASSERT_EQUAL(MegatecDriver::Transport::KRAULER, driver.transport());
+    TEST_ASSERT_EQUAL_STRING("MegatecDriver (krauler)", driver.getDriverName());
+
+    // krauler: warm-up first, one 102-byte Q1 string request per poll, nothing else
+    bridge.requests.clear();
+    bridge.replies[0x03] = LION_Q1_RAW;
+    bridge.replies[0x0d] = LION_F_RAW;
+    uint32_t t = 30000;
+    for (int i = 0; i < MegatecDriver::KRAULER_WARMUP_POLLS; i++, t += MegatecDriver::POLL_MS)
+        driver.loop(&bridge, data, t);
+    assertIndices({ 0x03, 0x03, 0x03 });
+    for (const auto& r : bridge.requests) TEST_ASSERT_EQUAL_UINT16(102, r.length);
+    TEST_ASSERT_FALSE(driver.initialPollDone());
+
+    // Then F and Q1 without the lock-step, read with krauler's prefix
+    bridge.requests.clear();
+    driver.loop(&bridge, data, t);
+    assertIndices({ 0x0d, 0x03 });
+    for (const auto& r : bridge.requests) {
+        TEST_ASSERT_EQUAL_HEX16(0x0409, r.lang_id);
+        TEST_ASSERT_EQUAL_UINT16(102, r.length);
+    }
+    TEST_ASSERT_TRUE(driver.initialPollDone());
+    TEST_ASSERT_NOT_NULL(driver.profile());
+    TEST_ASSERT_EQUAL_STRING("lion", driver.profile()->key);
+    TEST_ASSERT_EQUAL_STRING("LiON", data.get("ups.model").c_str());
+    TEST_ASSERT_EQUAL_STRING("nutdrv_qx_mec", data.get("driver.name").c_str());
+    TEST_ASSERT_EQUAL_STRING("krauler", data.get("driver.parameter.subdriver").c_str());
+    // As the Pi read it: 0.56 x 48, the profile's nominal and limits, full
+    TEST_ASSERT_EQUAL_STRING("26.88", data.get("battery.voltage").c_str());
+    TEST_ASSERT_EQUAL_STRING("25.6", data.get("battery.voltage.nominal").c_str());
+    TEST_ASSERT_EQUAL_STRING("100", data.get("battery.charge").c_str());
+    TEST_ASSERT_EQUAL_STRING("OL", UPSData::computeUPSStatusString(data).c_str());
+}
+
+void test_transports_take_turns_until_one_answers(void) {
+    MegatecDriver driver;
+    driver.setup();
+    uint32_t t = 10000;
+    for (int i = 0; i < MegatecDriver::HUNNOX_POLLS_BEFORE_KRAULER; i++, t += MegatecDriver::POLL_MS)
+        driver.loop(&bridge, data, t);
+    TEST_ASSERT_EQUAL(MegatecDriver::Transport::KRAULER, driver.transport());
+    int krauler_polls = MegatecDriver::KRAULER_WARMUP_POLLS + MegatecDriver::HUNNOX_POLLS_BEFORE_KRAULER;
+    for (int i = 0; i < krauler_polls; i++, t += MegatecDriver::POLL_MS) driver.loop(&bridge, data, t);
+    TEST_ASSERT_EQUAL(MegatecDriver::Transport::HUNNOX, driver.transport());
+    // A SmartBox that answers hunnox at once never switches
+    MegatecDriver smartbox;
+    pollFor(smartbox, LEO_Q1, SMARTBOX_F, 20);
+    TEST_ASSERT_EQUAL(MegatecDriver::Transport::HUNNOX, smartbox.transport());
+    // Unplugged and plugged again: setup() starts with hunnox
+    driver.setup();
+    TEST_ASSERT_EQUAL(MegatecDriver::Transport::HUNNOX, driver.transport());
+}
+
 void test_profile_settings_of_the_lion(void) {
-    // What the LiON RT's driver reports; nutdrv_qx_mec (krauler) is not ported yet
+    // What the LiON RT's driver reports (nutdrv_qx_mec, krauler)
     data.set("driver.name", "nutdrv_qx_mec");
     data.set("battery.voltage.nominal", "24.0");
     data.set("battery.voltage.low", "20.00");
@@ -417,6 +532,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_driver_names_the_leo);
     RUN_TEST(test_driver_names_the_smartbox);
     RUN_TEST(test_driver_without_a_fitting_profile);
+    RUN_TEST(test_driver_names_the_neoline_without_ratings);
+    RUN_TEST(test_late_ratings_match_again);
+    RUN_TEST(test_status_alone_never_names_a_leo);
+    RUN_TEST(test_lion_answers_krauler_after_hunnox);
+    RUN_TEST(test_transports_take_turns_until_one_answers);
     RUN_TEST(test_profile_settings_of_the_lion);
     RUN_TEST(test_match_numbers_and_text);
     return UNITY_END();
