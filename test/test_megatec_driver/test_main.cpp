@@ -63,8 +63,9 @@ public:
 // The Tescom LEO on mains (24 V pack), as fake-upsd's dump of 23 Oct 2026 has its values
 static const char* LEO_Q1 = "(232.0 232.0 231.0 000 49.5 27.2 29.0 00001000\r";
 static const char* LEO_F = "#230.0 004 024.0 50.0\r";
-// The Smartbox: 12 V battery floating at 13.8 V
-static const char* SMARTBOX_F = "#230.0 002 012.0 50.0\r";
+// The Leo SmartBox: 12 V battery floating at 13.8 V. Its F fills only the battery
+// (read from the board on 2026-11-14); the input fields are blank
+static const char* SMARTBOX_F = "#   .   .  12.00   . \r";
 
 static UPSData data;
 static MockBridge bridge;
@@ -162,6 +163,20 @@ void test_charge_smartbox_on_battery(void) {
     TEST_ASSERT_EQUAL_STRING("10.40", data.get("battery.voltage.low").c_str());
     TEST_ASSERT_EQUAL_STRING("13.00", data.get("battery.voltage.high").c_str());
     TEST_ASSERT_EQUAL_STRING("50", data.get("battery.charge").c_str());
+}
+
+void test_f_smartbox_blank_fields(void) {
+    TEST_ASSERT_TRUE(Megatec::parseF(SMARTBOX_F, data));
+    TEST_ASSERT_EQUAL_STRING("12.0", data.get("battery.voltage.nominal").c_str());
+    TEST_ASSERT_FALSE(data.hasKey("input.voltage.nominal"));
+    TEST_ASSERT_FALSE(data.hasKey("input.current.nominal"));
+    TEST_ASSERT_FALSE(data.hasKey("input.frequency.nominal"));
+}
+
+void test_f_blank_from_a_waking_smartbox(void) {
+    // The first replies after it is plugged in, before the battery field fills
+    TEST_ASSERT_FALSE(Megatec::parseF("#   .   .    .     . \r", data));
+    TEST_ASSERT_FALSE(data.hasKey("battery.voltage.nominal"));
 }
 
 void test_f_zeros_from_a_waking_bridge(void) {
@@ -388,6 +403,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_q1_battery_packs);
     RUN_TEST(test_f_and_charge_leo);
     RUN_TEST(test_charge_smartbox_on_battery);
+    RUN_TEST(test_f_smartbox_blank_fields);
+    RUN_TEST(test_f_blank_from_a_waking_smartbox);
     RUN_TEST(test_f_zeros_from_a_waking_bridge);
     RUN_TEST(test_no_ack);
     RUN_TEST(test_hunnox_lock_step_and_poll);

@@ -112,18 +112,20 @@ bool parseQ1(const char* reply, UPSData& data, int battery_packs) {
 
 bool parseF(const char* reply, UPSData& data) {
     if (!reply || reply[0] != '#' || strlen(reply) < F_LENGTH - 1) return false;
-    double vnom, inom, bnom, fnom;
-    if (!number(reply, 1, 5, vnom) || !number(reply, 7, 9, inom) || !number(reply, 11, 15, bnom) ||
-        !number(reply, 17, 20, fnom)) {
-        return false;
-    }
-    // A waking MEC0003 bridge answers with zeros (deploy notes of the Tescom LiON RT)
-    if (vnom <= 0 && bnom <= 0 && fnom <= 0) return false;
+    // Each field on its own, as nutdrv_qx skips the items it cannot read: the Leo SmartBox
+    // fills only the battery ("#   .   .  12.00   . ", seen on the board 2026-11-14), and a
+    // waking MEC0003 bridge answers with zeros (deploy notes of the Tescom LiON RT)
+    double vnom = 0, inom = 0, bnom = 0, fnom = 0;
+    bool v = number(reply, 1, 5, vnom) && vnom > 0;
+    bool b = number(reply, 11, 15, bnom) && bnom > 0;
+    bool f = number(reply, 17, 20, fnom) && fnom > 0;
+    if (!v && !b && !f) return false;
+    bool i = number(reply, 7, 9, inom) && inom > 0;
 
-    data.set("input.voltage.nominal", format("%.0f", vnom));
-    data.set("input.current.nominal", format("%.1f", inom));
-    data.set("battery.voltage.nominal", format("%.1f", bnom));
-    data.set("input.frequency.nominal", format("%.0f", fnom));
+    if (v) data.set("input.voltage.nominal", format("%.0f", vnom));
+    if (i) data.set("input.current.nominal", format("%.1f", inom));
+    if (b) data.set("battery.voltage.nominal", format("%.1f", bnom));
+    if (f) data.set("input.frequency.nominal", format("%.0f", fnom));
     return true;
 }
 
