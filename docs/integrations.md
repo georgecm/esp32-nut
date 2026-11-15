@@ -81,6 +81,27 @@ Entities, created only for variables the UPS reports:
 
 Removing a UPS or turning discovery off publishes empty retained configs.
 
+**Names and the node device** (added 2026-11-15, after the first test in Home
+Assistant showed "UPS by Tescom", "Connected via Unnamed device"):
+
+- The UPS device's `model` is the Tescom model from the profile ("Leo SmartBox",
+  the profile's short name, as the stick's `ups.model`), its `name` is
+  "Tescom " + model ("Tescom Leo SmartBox"). Only when no profile fits: the
+  UPS's own `device.model`, else "UPS". Entity names stay short ("Battery
+  charge"); HA puts the device name in front.
+- The UPS's own firmware, when the UPS reports it, goes in `hw_version`;
+  `sw_version` is the publisher's version.
+- The node (`tescom_<node_id>`) must be a device of its own, or HA shows
+  "Unnamed device": the node publishes one diagnostic entity, object id
+  `connection` (binary_sensor, `connectivity`, from the availability topic),
+  whose `device` block is `{"identifiers":["tescom_<node_id>"],"manufacturer":"Tescom",
+  "model":"Tescom Edge" (stick) | "Tescom Connect" (agent),"name":"Tescom Edge <last 6 of MAC>" |
+  "Tescom Connect on <hostname>","sw_version":"...","configuration_url":"..."}`.
+  UPS devices point at it with `via_device`.
+- The brand logo next to these devices in Home Assistant is MQTT's: only an
+  integration listed in Home Assistant's brands repository shows its own logo,
+  which is what the Tescom Connect integration (section 4) is for.
+
 ## 3. Tescom Connect public API v1
 
 A documented, stable subset of the Connect API for other systems. The routes the
