@@ -66,7 +66,7 @@ Entities, created only for variables the UPS reports:
 | object_id | Component | From | Unit / device_class |
 | --- | --- | --- | --- |
 | `status` | sensor | `ups.status` | - |
-| `on_battery` | binary_sensor | `OB` in `ups.status` | `power`, inverted (on = on battery) |
+| `mains_power` | binary_sensor | on unless `OB` is in `ups.status` | `power` (on = mains present; HA reads "Detected" / "Cleared") |
 | `low_battery` | binary_sensor | `LB` in `ups.status` | `battery` |
 | `battery_charge` | sensor | `battery.charge` | `%`, `battery` |
 | `battery_runtime` | sensor | `battery.runtime` | `s`, `duration` |
@@ -80,6 +80,11 @@ Entities, created only for variables the UPS reports:
 | `link` | sensor (diagnostic) | link topic | - |
 
 Removing a UPS or turning discovery off publishes empty retained configs.
+
+`mains_power` replaced `on_battery` on 2026-11-15: with the `power` device class
+an "on battery" sensor read "Detected power" during a power cut. Publishers send
+an empty retained config for `<uid>/on_battery` once, so the old entity goes
+away; its name is "Mains power".
 
 **Names and the node device** (added 2026-11-15, after the first test in Home
 Assistant showed "UPS by Tescom", "Connected via Unnamed device"):
