@@ -44,6 +44,12 @@ public:
         uint16_t count = (uint16_t)(data[4] << 8 | data[5]);
         std::vector<uint8_t> reply = { data[0], fn };
         auto ex = exceptions.find(start);
+        if (fn == 0x06 && ex == exceptions.end()) {
+            // write_reg: stored, and the request echoed
+            holding[start] = count;
+            rx.insert(rx.end(), data, data + len);
+            return true;
+        }
         if (ex != exceptions.end() && fn != 0x02) {
             reply[1] = fn | 0x80;
             reply.push_back(ex->second);
@@ -682,6 +688,162 @@ void test_ch340_init_sequence(void) {
     TEST_ASSERT_EQUAL_HEX8(0xA4, r[2].bRequest);
 }
 
+// --- Instant commands ---
+
+// The control as the NUT server reaches it
+class MockPort : public IUpsControlPort {
+public:
+    bool connected = true;
+    void lock() const override {}
+    void unlock() const override {}
+    bool isConnected() const override { return connected; }
+    const UPSData& upsData() const override { return data; }
+    bool setBeeper(bool) override { return false; }
+    CommandResult executeCommand(const char*, const char*) override { return CommandResult::NOT_SUPPORTED; }
+};
+
+static PrimeDriver* g_driver = nullptr;
+static uint32_t g_now = 1000;
+// While a command waits, the poll task runs: one loop() call
+static void runDriverOnce() {
+    if (g_driver) g_driver->loop(&host, data, g_now);
+}
+
+static std::vector<uint8_t> frame(std::initializer_list<uint8_t> b) { return std::vector<uint8_t>(b); }
+
+void test_command_writes_match_the_documented_frames(void) {
+    Prime::CommandWrite w;
+    uint8_t req[8];
+    struct Case {
+        const char* name;
+        const char* param;
+        std::vector<uint8_t> bytes;
+    } cases[] = {
+        { "test.battery.start.quick", nullptr, frame({ 0x01, 0x06, 0xF0, 0x09, 0x00, 0x02, 0xEB, 0x09 }) },
+        { "test.battery.start", "1", frame({ 0x01, 0x06, 0xF0, 0x09, 0x01, 0x05, 0xAB, 0x5B }) },
+        { "test.battery.start", "", frame({ 0x01, 0x06, 0xF0, 0x09, 0x01, 0x05, 0xAB, 0x5B }) },
+        { "test.battery.start.deep", nullptr, frame({ 0x01, 0x06, 0xF0, 0x09, 0x00, 0x04, 0x6B, 0x0B }) },
+        { "test.battery.stop", nullptr, frame({ 0x01, 0x06, 0xF0, 0x09, 0x00, 0x01, 0xAB, 0x08 }) },
+        { "load.off", nullptr, frame({ 0x01, 0x06, 0xF0, 0x01, 0x00, 0x02, 0x6A, 0xCB }) },
+        { "load.on", nullptr, frame({ 0x01, 0x06, 0xF0, 0x01, 0x00, 0x01, 0x2A, 0xCA }) },
+    };
+    for (const auto& c : cases) {
+        TEST_ASSERT_EQUAL(CommandResult::OK, Prime::commandWrite(c.name, c.param, false, w));
+        TEST_ASSERT_EQUAL_UINT(8, ModbusRtu::buildWrite(1, w.reg, w.value, req));
+        TEST_ASSERT_EQUAL_HEX8_ARRAY(c.bytes.data(), req, 8);
+    }
+    TEST_ASSERT_EQUAL(CommandResult::OK, Prime::commandWrite("beeper.toggle", nullptr, true, w));
+    TEST_ASSERT_EQUAL_HEX16(0x13, w.reg);
+    TEST_ASSERT_EQUAL_UINT16(0, w.value);
+    TEST_ASSERT_EQUAL(CommandResult::OK, Prime::commandWrite("beeper.mute", nullptr, false, w));
+    TEST_ASSERT_EQUAL_UINT16(1, w.value);
+    TEST_ASSERT_EQUAL(CommandResult::INVALID_ARGUMENT, Prime::commandWrite("test.battery.start", "100", false, w));
+    TEST_ASSERT_EQUAL(CommandResult::INVALID_ARGUMENT, Prime::commandWrite("test.battery.start", "0", false, w));
+    TEST_ASSERT_EQUAL(CommandResult::NOT_SUPPORTED, Prime::commandWrite("shutdown.return", nullptr, false, w));
+}
+
+void test_control_lists_the_commands(void) {
+    PrimeDriver driver(&ups);
+    MockPort port;
+    auto cmds = driver.control().supportedCommands(port);
+    TEST_ASSERT_EQUAL_UINT(10, cmds.size());
+    bool off = false;
+    for (auto* c : cmds) off = off || std::string(c->name) == "load.off";
+    TEST_ASSERT_TRUE(off);
+    port.connected = false;
+    TEST_ASSERT_EQUAL_UINT(0, driver.control().supportedCommands(port).size());
+    TEST_ASSERT_EQUAL(CommandResult::NOT_CONNECTED, driver.control().executeCommand(port, "load.on", nullptr));
+}
+
+void test_command_goes_out_through_the_poll_task(void) {
+    primeOnline();
+    PrimeDriver driver(&ups);
+    driver.setup();
+    runPoll(driver, 1000);
+    g_driver = &driver;
+    PrimeCommands::setWaitHook(runDriverOnce);
+    MockPort port;
+    size_t before = ups.writes.size();
+    TEST_ASSERT_EQUAL(CommandResult::OK, driver.control().executeCommand(port, "beeper.enable", nullptr));
+    // One request: the write, nothing of the poll in between
+    TEST_ASSERT_EQUAL_UINT(before + 1, ups.writes.size());
+    TEST_ASSERT_EQUAL_HEX8(0x06, ups.writes.back()[1]);
+    TEST_ASSERT_EQUAL_UINT16(0, ups.holding[0x13]);
+    TEST_ASSERT_EQUAL_STRING("enabled", data.get("ups.beeper.status").c_str());
+    // toggle reads the beeper as the data has it
+    TEST_ASSERT_EQUAL(CommandResult::OK, driver.control().executeCommand(port, "beeper.toggle", nullptr));
+    TEST_ASSERT_EQUAL_UINT16(1, ups.holding[0x13]);
+    TEST_ASSERT_EQUAL_STRING("muted", data.get("ups.beeper.status").c_str());
+    // Refused by the UPS: failed, and the slot is free again
+    ups.exceptions[0xF001] = 0x03;
+    TEST_ASSERT_EQUAL(CommandResult::FAILED, driver.control().executeCommand(port, "load.off", nullptr));
+    ups.exceptions.clear();
+    TEST_ASSERT_EQUAL(CommandResult::OK, driver.control().executeCommand(port, "load.on", nullptr));
+    TEST_ASSERT_EQUAL_UINT16(1, ups.holding[0xF001]);
+    PrimeCommands::setWaitHook(nullptr);
+    g_driver = nullptr;
+}
+
+void test_command_without_a_driver_times_out(void) {
+    PrimeCommands::setWaitHook([] {});
+    Prime::CommandWrite w;
+    Prime::commandWrite("load.on", nullptr, false, w);
+    TEST_ASSERT_EQUAL(CommandResult::FAILED, PrimeCommands::run(w));
+    // Withdrawn: the next command can go
+    TEST_ASSERT_FALSE(PrimeCommands::take(w));
+    PrimeCommands::setWaitHook(nullptr);
+}
+
+void test_battery_test_is_ol_cal_then_done(void) {
+    primeOnline();
+    PrimeDriver driver(&ups);
+    driver.setup();
+    runPoll(driver, 1000);
+    g_driver = &driver;
+    g_now = 1500;
+    PrimeCommands::setWaitHook(runDriverOnce);
+    MockPort port;
+    TEST_ASSERT_EQUAL(CommandResult::OK, driver.control().executeCommand(port, "test.battery.start.quick", nullptr));
+    TEST_ASSERT_EQUAL_STRING("Requested", data.get("ups.test.result").c_str());
+    // The test runs: battery mode with mains present
+    ups.bits = { { 122, 1 } };
+    ups.input[0x48] = 9;
+    runPoll(driver, 4000);
+    // Flags in UPSData's order: CAL before OL
+    TEST_ASSERT_EQUAL_STRING("CAL OL", status().c_str());
+    TEST_ASSERT_EQUAL_STRING("In progress", data.get("ups.test.result").c_str());
+    // Back online
+    ups.bits = { { 121, 1 } };
+    ups.input[0x48] = 10;
+    runPoll(driver, 7000);
+    TEST_ASSERT_EQUAL_STRING("Done", data.get("ups.test.result").c_str());
+    TEST_ASSERT_TRUE(status().rfind("OL", 0) == 0);
+    // Battery mode without a test asked here stays OB
+    primeOnBattery();
+    runPoll(driver, 10000);
+    TEST_ASSERT_TRUE(status().find("OB") != std::string::npos);
+    PrimeCommands::setWaitHook(nullptr);
+    g_driver = nullptr;
+}
+
+void test_battery_test_that_never_starts(void) {
+    primeOnline();
+    PrimeDriver driver(&ups);
+    driver.setup();
+    runPoll(driver, 1000);
+    g_driver = &driver;
+    g_now = 1500;
+    PrimeCommands::setWaitHook(runDriverOnce);
+    MockPort port;
+    TEST_ASSERT_EQUAL(CommandResult::OK, driver.control().executeCommand(port, "test.battery.start.quick", nullptr));
+    runPoll(driver, 60000);
+    TEST_ASSERT_EQUAL_STRING("Requested", data.get("ups.test.result").c_str());
+    runPoll(driver, 130000);
+    TEST_ASSERT_TRUE(data.get("ups.test.result").startsWith("Not started"));
+    PrimeCommands::setWaitHook(nullptr);
+    g_driver = nullptr;
+}
+
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_crc16_known_frames);
@@ -710,6 +872,12 @@ int main(int argc, char** argv) {
     RUN_TEST(test_driver_model_and_beeper_failures_are_not_fatal);
     RUN_TEST(test_driver_waits_while_polling_is_paused);
     RUN_TEST(test_driver_reads_only);
+    RUN_TEST(test_command_writes_match_the_documented_frames);
+    RUN_TEST(test_control_lists_the_commands);
+    RUN_TEST(test_command_goes_out_through_the_poll_task);
+    RUN_TEST(test_command_without_a_driver_times_out);
+    RUN_TEST(test_battery_test_is_ol_cal_then_done);
+    RUN_TEST(test_battery_test_that_never_starts);
     RUN_TEST(test_registry_serial_path);
     RUN_TEST(test_ch340_divisor);
     RUN_TEST(test_ch340_init_sequence);

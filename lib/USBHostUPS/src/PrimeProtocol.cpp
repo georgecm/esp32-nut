@@ -9,6 +9,8 @@
 
 #include "PrimeProtocol.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
 
 namespace {
 
@@ -57,10 +59,92 @@ void setStaticInfo(UPSData& data, int lowbatt) {
     if (!data.hasKey("ups.test.result")) data.set("ups.test.result", "No test initiated");
 }
 
-void decode(const uint16_t* r, const uint8_t* bit, UPSData& data, int lowbatt) {
+const char* const* commandNames(size_t& count) {
+    static const char* const names[] = {
+        "beeper.enable", "beeper.disable", "beeper.mute", "beeper.toggle",
+        "test.battery.start.quick", "test.battery.start", "test.battery.start.deep", "test.battery.stop",
+        "load.off", "load.on",
+    };
+    count = sizeof(names) / sizeof(names[0]);
+    return names;
+}
+
+CommandResult commandWrite(const char* name, const char* param, bool beeper_muted, CommandWrite& out) {
+    if (!name) return CommandResult::NOT_SUPPORTED;
+    if (!strcasecmp(name, "beeper.enable") || !strcasecmp(name, "beeper.disable") || !strcasecmp(name, "beeper.mute") ||
+        !strcasecmp(name, "beeper.toggle")) {
+        bool muted = !strcasecmp(name, "beeper.enable") ? false : !strcasecmp(name, "beeper.toggle") ? !beeper_muted : true;
+        out = { REG_BEEPER, (uint16_t)(muted ? 1 : 0), CommandKind::BEEPER };
+        return CommandResult::OK;
+    }
+    if (!strcasecmp(name, "test.battery.start.quick")) {
+        out = { REG_TEST, 2, CommandKind::TEST_START };
+        return CommandResult::OK;
+    }
+    if (!strcasecmp(name, "test.battery.start.deep")) {
+        out = { REG_TEST, 4, CommandKind::TEST_START };
+        return CommandResult::OK;
+    }
+    if (!strcasecmp(name, "test.battery.start")) {
+        // The length in minutes, 1 by default
+        int minutes = param && *param ? atoi(param) : 1;
+        if (minutes < 1 || minutes > 99) return CommandResult::INVALID_ARGUMENT;
+        out = { REG_TEST, (uint16_t)((minutes << 8) | 5), CommandKind::TEST_START };
+        return CommandResult::OK;
+    }
+    if (!strcasecmp(name, "test.battery.stop")) {
+        out = { REG_TEST, 1, CommandKind::TEST_STOP };
+        return CommandResult::OK;
+    }
+    // 0xF001 switches the inverter at once: with mains present, off leaves the output on
+    // through bypass; on battery it cuts the output
+    if (!strcasecmp(name, "load.off") || !strcasecmp(name, "load.on")) {
+        out = { REG_OUTPUT, (uint16_t)(!strcasecmp(name, "load.on") ? 1 : 2), CommandKind::INVERTER };
+        return CommandResult::OK;
+    }
+    return CommandResult::NOT_SUPPORTED;
+}
+
+void noteCommand(const CommandWrite& w, TestState& test, UPSData& data, uint32_t now_ms) {
+    if (w.kind == CommandKind::BEEPER) {
+        decodeBeeper(w.value, data);
+    } else if (w.kind == CommandKind::TEST_STOP) {
+        test.asked = false;
+        test.stopped = true;
+        data.set("ups.test.result", "Aborted");
+    } else if (w.kind == CommandKind::TEST_START) {
+        test.asked = true;
+        test.asked_ms = now_ms;
+        test.stopped = false;
+        data.set("ups.test.result", "Requested");
+    }
+}
+
+void decode(const uint16_t* r, const uint8_t* bit, UPSData& data, int lowbatt, TestState* test, uint32_t now_ms) {
     bool on_battery = false;
     bool online = false, discharging = false, charging = false, low = false, bypass = false, off = false;
-    switch (mode(r, bit)) {
+    bool cal = false;
+    Mode m = mode(r, bit);
+    // A battery test shows as battery mode with mains still there: OL CAL, not OB. Only for a
+    // test asked here: the Prime also goes to battery with mains present on overvoltage
+    if (m == Mode::BATTERY && test && r[R_INPUT_V] >= TEST_INPUT && (test->testing || test->asked)) {
+        online = true;
+        cal = true;
+        if (!test->testing && !test->stopped) data.set("ups.test.result", "In progress");
+        test->testing = true;
+        test->asked = false;
+    } else if (test) {
+        if (test->testing && !test->stopped) data.set("ups.test.result", "Done");
+        test->testing = false;
+        // Out of battery mode: a stop has done its work, and the next test starts afresh
+        test->stopped = false;
+        if (test->asked && now_ms - test->asked_ms > TEST_WAIT_MS) {
+            // Taken (echoed) but never run: the Prime does that for a while after a test
+            data.set("ups.test.result", "Not started (the UPS may still be recharging from the last test)");
+            test->asked = false;
+        }
+    }
+    switch (cal ? Mode::ONLINE : m) {
     case Mode::BATTERY:
         on_battery = true;
         discharging = true;
@@ -69,7 +153,7 @@ void decode(const uint16_t* r, const uint8_t* bit, UPSData& data, int lowbatt) {
     case Mode::ONLINE:
         online = true;
         // 0x3E reads 3-4 while charging, 0-1 otherwise
-        charging = r[R_CHARGE] < 100 && r[R_CHARGING] > 1;
+        charging = !cal && r[R_CHARGE] < 100 && r[R_CHARGING] > 1;
         break;
     case Mode::BYPASS:
         online = true;
@@ -95,7 +179,7 @@ void decode(const uint16_t* r, const uint8_t* bit, UPSData& data, int lowbatt) {
     setFlag(data, "ups.status.battery_low", low);
     setFlag(data, "ups.status.bypassauto", bypass);
     setFlag(data, "ups.status.off", off);
-    setFlag(data, "ups.status.cal", false);
+    setFlag(data, "ups.status.cal", cal);
 
     data.set("input.voltage", tenths(r[R_INPUT_V]));
     data.set("input.frequency", r[R_INPUT_V] >= 500 ? tenths(r[R_INPUT_HZ]) : String("0.0"));

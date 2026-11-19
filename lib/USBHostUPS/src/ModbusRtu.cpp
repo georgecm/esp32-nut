@@ -43,6 +43,20 @@ size_t buildRead(uint8_t slave, uint8_t function, uint16_t start, uint16_t count
     return REQUEST_LENGTH;
 }
 
+size_t buildWrite(uint8_t slave, uint16_t reg, uint16_t value, uint8_t* out) {
+    if (!out) return 0;
+    out[0] = slave;
+    out[1] = WRITE_SINGLE_REGISTER;
+    out[2] = (uint8_t)(reg >> 8);
+    out[3] = (uint8_t)(reg & 0xFF);
+    out[4] = (uint8_t)(value >> 8);
+    out[5] = (uint8_t)(value & 0xFF);
+    uint16_t crc = crc16(out, 6);
+    out[6] = (uint8_t)(crc & 0xFF);
+    out[7] = (uint8_t)(crc >> 8);
+    return REQUEST_LENGTH;
+}
+
 size_t replyLength(uint8_t function, uint16_t count) {
     if (function == READ_DISCRETE_INPUTS) return 5 + (count + 7) / 8;
     return 5 + 2 * (size_t)count;
@@ -116,6 +130,17 @@ Result Master::readRegisters(uint8_t function, uint16_t start, uint16_t count, u
     if (r != Result::OK) return r;
     // read_regs(): reply[2] != 2 * count is a failed read
     return decodeRegisters(reply, got, count, out) ? Result::OK : Result::NO_REPLY;
+}
+
+Result Master::writeRegister(uint16_t reg, uint16_t value) {
+    uint8_t req[REQUEST_LENGTH];
+    buildWrite(_slave, reg, value, req);
+    uint8_t reply[MAX_REPLY];
+    size_t got = 0;
+    Result r = transact(req, reply, REQUEST_LENGTH, got);
+    if (r != Result::OK) return r;
+    // write_reg(): the UPS took it when it echoes the request
+    return got == REQUEST_LENGTH && memcmp(reply, req, REQUEST_LENGTH) == 0 ? Result::OK : Result::NO_REPLY;
 }
 
 Result Master::readBits(uint16_t start, uint16_t count, uint8_t* out) {

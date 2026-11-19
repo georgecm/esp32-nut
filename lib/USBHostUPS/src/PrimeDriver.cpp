@@ -3,25 +3,57 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Port of tescom_prime.c (Tescom Connect, nut-app deploy/nut-drivers/tescom_prime.c,
- * driver version 0.04), reads only.
+ * driver version 0.04), with its instant commands.
  */
 
 #include "PrimeDriver.h"
 #include "IHidTransport.h"
+#include <atomic>
+#include <stdio.h>
 
 namespace {
 
-// A control with no command and no writable variable: the driver only reads
+// The slot between the NUT server's task (run) and the poll task (take, done)
+enum Slot : uint8_t { IDLE, FILLING, WAITING, SENDING, ANSWERED };
+std::atomic<uint8_t> g_slot{ IDLE };
+Prime::CommandWrite g_write;
+bool g_ok = false;
+void defaultWait() { delay(10); }
+void (*g_wait)() = defaultWait;
+
+// The commands of the C driver; no writable variable
 class PrimeControl : public IUpsControl {
 public:
-    std::vector<const UPSCommandInfo*> supportedCommands(const IUpsControlPort&) const override { return {}; }
-    CommandResult executeCommand(IUpsControlPort& port, const char*, const char*) const override {
-        return port.isConnected() ? CommandResult::NOT_SUPPORTED : CommandResult::NOT_CONNECTED;
+    std::vector<const UPSCommandInfo*> supportedCommands(const IUpsControlPort& port) const override {
+        std::vector<const UPSCommandInfo*> out;
+        if (!port.isConnected()) return out;
+        size_t count = 0;
+        const char* const* names = Prime::commandNames(count);
+        for (size_t i = 0; i < count; i++) {
+            if (const UPSCommandInfo* info = UpsCommands::find(names[i])) out.push_back(info);
+        }
+        return out;
+    }
+    CommandResult executeCommand(IUpsControlPort& port, const char* name, const char* param) const override {
+        if (!port.isConnected()) return CommandResult::NOT_CONNECTED;
+        port.lock();
+        bool muted = port.upsData().get("ups.beeper.status") == "muted";
+        port.unlock();
+        Prime::CommandWrite w;
+        CommandResult r = Prime::commandWrite(name, param, muted, w);
+        if (r != CommandResult::OK) return r;
+        return PrimeCommands::run(w);
     }
     NutTable::SetStatus setVariable(IUpsControlPort& port, const char*, const char*) const override {
         return port.isConnected() ? NutTable::SetStatus::UNKNOWN : NutTable::SetStatus::NOT_CONNECTED;
     }
 };
+
+String hex4(uint16_t v) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%04X", v);
+    return String(buf);
+}
 
 const char* resultName(ModbusRtu::Result r) {
     switch (r) {
@@ -33,6 +65,43 @@ const char* resultName(ModbusRtu::Result r) {
 }
 
 } // namespace
+
+namespace PrimeCommands {
+
+void setWaitHook(void (*hook)()) { g_wait = hook ? hook : defaultWait; }
+
+CommandResult run(const Prime::CommandWrite& w) {
+    uint8_t idle = IDLE;
+    if (!g_slot.compare_exchange_strong(idle, FILLING)) return CommandResult::FAILED;
+    g_write = w;
+    g_slot.store(WAITING);
+    // Counted in waits of 10 ms (g_wait), so the tests need no clock
+    for (uint32_t waited = 0; g_slot.load() != ANSWERED; waited += 10) {
+        if (waited >= WAIT_MS) {
+            // Not taken yet: withdrawn. Being sent: its answer is close, keep waiting
+            uint8_t waiting = WAITING;
+            if (g_slot.compare_exchange_strong(waiting, IDLE)) return CommandResult::FAILED;
+        }
+        g_wait();
+    }
+    bool ok = g_ok;
+    g_slot.store(IDLE);
+    return ok ? CommandResult::OK : CommandResult::FAILED;
+}
+
+bool take(Prime::CommandWrite& w) {
+    uint8_t waiting = WAITING;
+    if (!g_slot.compare_exchange_strong(waiting, SENDING)) return false;
+    w = g_write;
+    return true;
+}
+
+void done(bool ok) {
+    g_ok = ok;
+    g_slot.store(ANSWERED);
+}
+
+} // namespace PrimeCommands
 
 const char* const PrimeDriver::DRIVER_VERSION = "0.04";
 
@@ -50,6 +119,7 @@ void PrimeDriver::setup() {
     _model_done = false;
     _model_tries = 0;
     _first_done = false;
+    _test = Prime::TestState();
 }
 
 void PrimeDriver::setDriverVars(UPSData& data) const {
@@ -113,10 +183,28 @@ bool PrimeDriver::runStep(IHidTransport* host, UPSData& data) {
     return true;
 }
 
+bool PrimeDriver::runCommand(IHidTransport* host, UPSData& data, uint32_t now) {
+    Prime::CommandWrite w;
+    if (!PrimeCommands::take(w)) return false;
+    ModbusRtu::Result r = _modbus.writeRegister(w.reg, w.value);
+    bool ok = r == ModbusRtu::Result::OK;
+    if (ok) {
+        _port->noteExchange(true);
+        host->lock();
+        Prime::noteCommand(w, _test, data, now);
+        host->unlock();
+    } else {
+        host->logDebug(String("[Prime] write 0x") + hex4(w.reg) + " = " + String((unsigned)w.value) +
+                       ": " + resultName(r));
+    }
+    PrimeCommands::done(ok);
+    return true;
+}
+
 void PrimeDriver::commit(IHidTransport* host, UPSData& data) {
     host->lock();
     Prime::setStaticInfo(data);
-    Prime::decode(_regs, _bits, data);
+    Prime::decode(_regs, _bits, data, Prime::LOWBATT, &_test, _last_poll);
     setDriverVars(data);
     if (!_profile) {
         _profile = UpsProfiles::identify(0x1A86, 0x7523, data);
@@ -131,6 +219,8 @@ void PrimeDriver::commit(IHidTransport* host, UPSData& data) {
 
 void PrimeDriver::loop(IHidTransport* host, UPSData& data, uint32_t now) {
     if (!host || !_port || host->isPollingPaused()) return;
+    // A command goes out between two requests of the poll, in place of the next one
+    if (runCommand(host, data, now)) return;
     if (!_in_poll) {
         if (_polled && (now - _last_poll) < POLL_MS) return;
         _polled = true;

@@ -18,6 +18,7 @@ namespace ModbusRtu {
 static const uint8_t READ_DISCRETE_INPUTS = 0x02;
 static const uint8_t READ_HOLDING_REGISTERS = 0x03;
 static const uint8_t READ_INPUT_REGISTERS = 0x04;
+static const uint8_t WRITE_SINGLE_REGISTER = 0x06;
 
 // Longest read of one request: registers (read_regs) and bits (read_bits, 8 bytes)
 static const uint16_t MAX_REGISTERS = 32;
@@ -42,6 +43,10 @@ uint16_t crc16(const uint8_t* data, size_t len);
  * @return REQUEST_LENGTH, or 0 for a count the C driver would refuse
  */
 size_t buildRead(uint8_t slave, uint8_t function, uint16_t start, uint16_t count, uint8_t* out);
+
+// The 8-byte request of function 06 (write_reg of the C driver): slave, 06, register,
+// value (both big-endian), CRC. The normal reply echoes it.
+size_t buildWrite(uint8_t slave, uint16_t reg, uint16_t value, uint8_t* out);
 
 // Length of the normal reply to a read: 5 + byte count
 size_t replyLength(uint8_t function, uint16_t count);
@@ -76,6 +81,9 @@ public:
     Result readRegisters(uint8_t function, uint16_t start, uint16_t count, uint16_t* out);
     // Function 02: count (1-64) discrete inputs from start into out, one per byte
     Result readBits(uint16_t start, uint16_t count, uint8_t* out);
+
+    // Function 06: one holding register; OK only when the UPS echoes the request
+    Result writeRegister(uint16_t reg, uint16_t value);
 
     // Exception code of the last EXCEPTION result
     uint8_t lastException() const { return _last_exception; }

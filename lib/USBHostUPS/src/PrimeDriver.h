@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * Port of tescom_prime.c (Tescom Connect, nut-app deploy/nut-drivers/tescom_prime.c,
- * driver version 0.04), reads only.
+ * driver version 0.04), with its instant commands.
  */
 
 #ifndef PRIME_DRIVER_H
@@ -28,9 +28,34 @@
  * A request that gets no reply ends the poll, as dstate_datastale() in the C driver: the
  * host's link monitor (ISerialPort::noteExchange) turns the data stale.
  *
- * Reads only: the instant commands of the C driver (beeper.*, test.battery.*, load.off,
- * load.on) are not ported yet, so nothing but reads is ever sent to the UPS.
+ * The instant commands of the C driver (beeper.*, test.battery.*, load.off, load.on) come
+ * from the NUT server's task through a one-slot mailbox (PrimeCommands): the poll task sends
+ * the write between two requests of the poll, so only one task ever talks to the port, and
+ * the control waits for its answer. load.off switches the inverter off at once: on battery
+ * that cuts the output.
  */
+namespace PrimeCommands {
+
+// How long the control waits for the poll task to send a command and get its echo
+static const uint32_t WAIT_MS = 8000;
+
+/**
+ * @brief Hands a write to the poll task and waits for it. FAILED when another command is
+ * still in the slot, when the UPS refused or did not answer, or when nothing took it within
+ * WAIT_MS (the driver gone).
+ */
+CommandResult run(const Prime::CommandWrite& w);
+
+// Called for each 10 ms run() waits (delay(10) by default): the tests run the driver's loop here
+void setWaitHook(void (*hook)());
+
+// The poll task's side: the write waiting, if any (and marks it taken)
+bool take(Prime::CommandWrite& w);
+// The poll task's side: the answer to the write taken
+void done(bool ok);
+
+} // namespace PrimeCommands
+
 class PrimeDriver : public IUPSDriver {
 public:
     explicit PrimeDriver(ISerialPort* port) : _port(port), _modbus(*port, Prime::SLAVE) {}
@@ -46,6 +71,7 @@ public:
     void parseStringDescriptor(IHidTransport*, uint8_t, const uint8_t*, size_t, UPSData&) override {}
 
     bool beeperControllable() const override { return false; }
+    // HID flags: PrimeControl lists and runs its own commands, so these stay off
     bool beeperMuteSupported() const override { return false; }
     bool shutdownCommandsSupported() const override { return false; }
     bool delayVariablesSupported() const override { return false; }
@@ -71,6 +97,8 @@ private:
 
     // One request of the poll; false ends it
     bool runStep(IHidTransport* host, UPSData& data);
+    // A command waiting in the mailbox, sent in place of a poll request; true when there was one
+    bool runCommand(IHidTransport* host, UPSData& data, uint32_t now);
     void commit(IHidTransport* host, UPSData& data);
     void setDriverVars(UPSData& data) const;
 
@@ -86,6 +114,7 @@ private:
     bool _model_done = false;
     uint8_t _model_tries = 0;
     bool _first_done = false;
+    Prime::TestState _test;
 };
 
 #endif // PRIME_DRIVER_H

@@ -13,6 +13,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "UPSData.h"
+#include "UpsCommands.h"
 
 /**
  * @brief The Tescom Prime (an EAST EA900 G4): Modbus RTU registers turned into NUT
@@ -28,6 +29,13 @@ static const uint16_t BITS_BLOCK = 64;
 static const uint16_t REG_BEEPER = 0x13;  // holding: 1 muted, 0 sounding
 static const uint16_t REG_MODEL = 0xA1;   // holding 0xA1-0xA7: "EA900_1-3K_G4"
 static const uint16_t MODEL_REGS = 7;
+// Holding registers written by the commands (function 06), docs/PRIME-MODBUS.md "Commands"
+static const uint16_t REG_TEST = 0xF009;   // 1 cancel, 2 quick, 4 to low battery, (n << 8) | 5 n minutes
+static const uint16_t REG_OUTPUT = 0xF001; // inverter: 1 on, 2 off at once (no delay)
+// Input (0.1 V) at or above which battery mode is a test, not a cut
+static const uint16_t TEST_INPUT = 1700;
+// A test may take this long to start (46 s seen on 2026-11-12)
+static const uint32_t TEST_WAIT_MS = 120000;
 // LB at or below this charge on battery (lowbatt of the C driver, default 20)
 static const int LOWBATT = 20;
 
@@ -55,6 +63,37 @@ static const uint16_t BIT_BYPASS = 123;
 
 enum class Mode : uint8_t { BATTERY, ONLINE, BYPASS, OFF };
 
+/**
+ * @brief A battery test asked through the driver and not yet seen running, whether one runs
+ * now, and whether the last one was stopped (test_asked, testing, test_stopped of the C driver).
+ */
+struct TestState {
+    bool asked = false;
+    uint32_t asked_ms = 0;
+    bool testing = false;
+    bool stopped = false;
+};
+
+// What a command writes: register, value, and what it is for the driver's bookkeeping
+enum class CommandKind : uint8_t { BEEPER, TEST_START, TEST_STOP, INVERTER };
+struct CommandWrite {
+    uint16_t reg = 0;
+    uint16_t value = 0;
+    CommandKind kind = CommandKind::BEEPER;
+};
+
+// The instant commands of the C driver, in its order
+const char* const* commandNames(size_t& count);
+
+/**
+ * @brief instcmd() of the C driver without the I/O: the write a command makes. beeper.toggle
+ * flips beeper_muted; test.battery.start takes its length in minutes (1-99, 1 when empty).
+ *
+ * @return OK, NOT_SUPPORTED for a command it does not know, INVALID_ARGUMENT for minutes
+ * out of range
+ */
+CommandResult commandWrite(const char* name, const char* param, bool beeper_muted, CommandWrite& out);
+
 // The mode from the status bits, between them (starting up) from the mode register 0x48
 Mode mode(const uint16_t* r, const uint8_t* bit);
 
@@ -71,11 +110,15 @@ void setStaticInfo(UPSData& data, int lowbatt = LOWBATT);
  * @param r the 0x50 input registers
  * @param bit the 128 discrete inputs, one per byte
  *
- * The OL CAL branch of the C driver (battery mode with mains present while a test asked
- * through the driver runs) needs the test commands, not ported: a test shows as OB, the
- * same as a test started from the front panel does in the C driver.
+ * With test, the OL CAL branch of the C driver: battery mode with mains present while a test
+ * asked through the driver runs is OL CAL, not OB, and ups.test.result follows the test. A
+ * test started from the front panel shows as OB, as in the C driver.
  */
-void decode(const uint16_t* r, const uint8_t* bit, UPSData& data, int lowbatt = LOWBATT);
+void decode(const uint16_t* r, const uint8_t* bit, UPSData& data, int lowbatt = LOWBATT,
+            TestState* test = nullptr, uint32_t now_ms = 0);
+
+// After a command the UPS took: ups.test.result and the test bookkeeping, as instcmd()
+void noteCommand(const CommandWrite& w, TestState& test, UPSData& data, uint32_t now_ms);
 
 // ups.beeper.status from holding register 0x13
 void decodeBeeper(uint16_t value, UPSData& data);
