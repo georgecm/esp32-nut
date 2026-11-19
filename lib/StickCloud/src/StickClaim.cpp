@@ -58,7 +58,7 @@ std::string pollBody(const std::string& poll_token) {
 }
 
 std::string heartbeatBody(const std::string& fw_version, uint64_t started_at_ms, const char* link,
-                          const char* ups_status) {
+                          const char* ups_status, const ControlLogin* control) {
     JsonDocument doc;
     doc["agentVersion"] = fw_version;
     JsonObject st = doc["status"].to<JsonObject>();
@@ -66,6 +66,15 @@ std::string heartbeatBody(const std::string& fw_version, uint64_t started_at_ms,
     st["link"] = link ? link : "";
     if (ups_status && *ups_status) st["upsStatus"] = ups_status;
     st["agentKind"] = "stick";
+    if (control && !control->username.empty() && !control->password.empty() && !control->ups.empty()) {
+        JsonObject c = doc["control"].to<JsonObject>();
+        c["username"] = control->username;
+        c["password"] = control->password;
+        c["port"] = control->port;
+        c["ups"].to<JsonArray>().add(control->ups);
+        JsonArray a = c["addresses"].to<JsonArray>();
+        if (!control->address.empty() && control->address != "0.0.0.0") a.add(control->address);
+    }
     std::string out;
     serializeJson(doc, out);
     return out;

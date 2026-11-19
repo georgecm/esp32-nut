@@ -39,6 +39,15 @@ public:
     // next boot polls the same code instead of asking for a new one (which would replace it)
     void keepCodeForRestart();
 
+    /**
+     * @brief The stick's control login (NVS "stick_ctl"): user tescom-connect and a random
+     * password made on first use. The NUT server accepts it; the heartbeat sends it, with
+     * the UPS's NUT name, so the account's apps on this network can run commands.
+     */
+    static void controlLogin(String& username, String& password);
+    // The UPS's NUT name for the control login in the heartbeat; empty sends no login
+    void setControlUps(const String& ups) { _control_ups = ups; }
+
 private:
     static void taskEntry(void* arg);
     void run();
@@ -54,6 +63,7 @@ private:
     // On a Wi-Fi with an address: the active link, or the station next to the setup network
     bool connected() const;
 
+    String _control_ups;
     USBHostUPS* _ups = nullptr;
     AppNetworkManager* _net = nullptr;
     ZabbixClient* _zabbix = nullptr;

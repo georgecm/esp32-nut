@@ -10,6 +10,7 @@
 #include <WiFi.h>
 #include <esp_attr.h>
 #include <esp_crt_bundle.h>
+#include <esp_random.h>
 #include <esp_http_client.h>
 #include <string.h>
 #include <time.h>
@@ -327,8 +328,19 @@ void CloudClient::heartbeat() {
     String status = _ups->getUPSStatusString();
     std::string out;
     String error;
+    StickClaim::ControlLogin control;
+    if (_control_ups.length()) {
+        String user, pass;
+        controlLogin(user, pass);
+        control.username = user.c_str();
+        control.password = pass.c_str();
+        control.ups = _control_ups.c_str();
+        control.address = _net ? _net->localIP().c_str() : "";
+    }
     int code = httpsPost(String(CLOUD_URL) + "/v1/agent/heartbeat",
-                         StickClaim::heartbeatBody(FIRMWARE_VERSION, _started_at_ms, link, status.c_str()), token, out, error);
+                         StickClaim::heartbeatBody(FIRMWARE_VERSION, _started_at_ms, link, status.c_str(),
+                                                   _control_ups.length() ? &control : nullptr),
+                         token, out, error);
     _last_heartbeat = millis();
     _heartbeat_sent = true;
     if (code == 200) {
@@ -389,6 +401,27 @@ void CloudClient::applyCredentials(const StickClaim::Credentials& c) {
     m.key_pem = StickIdentity::privateKeyPem();
     m.device_id = c.device_id;
     _zabbix->setManaged(m);
+}
+
+void CloudClient::controlLogin(String& username, String& password) {
+    static const char* const NS = "stick_ctl";
+    username = "tescom-connect";
+    Preferences p;
+    if (p.begin(NS, true)) {
+        password = p.getString("pw", "");
+        p.end();
+    }
+    if (password.length() >= 16) return;
+    // 24 characters from the hardware random generator, letters and digits only (no NUT quoting)
+    static const char ALPHABET[] = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    char buf[25];
+    for (int i = 0; i < 24; i++) buf[i] = ALPHABET[esp_random() % (sizeof(ALPHABET) - 1)];
+    buf[24] = 0;
+    password = buf;
+    if (p.begin(NS, false)) {
+        p.putString("pw", password);
+        p.end();
+    }
 }
 
 bool CloudClient::loadCredentials(StickClaim::Credentials& c) {

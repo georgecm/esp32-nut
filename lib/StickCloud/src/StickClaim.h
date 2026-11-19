@@ -95,9 +95,23 @@ struct StartRequest {
 };
 std::string startBody(const StartRequest& r);
 std::string pollBody(const std::string& poll_token);
-// {"agentVersion":..,"status":{..}} for /v1/agent/heartbeat
+/**
+ * @brief The stick's control login, for the account's apps on its network: the cloud keeps
+ * it (hubControl) and hands it to the members who may control the UPS (GET /v1/control), as
+ * it does for a Raspberry Pi's tescom-agent. Readings stay on the network; only the login
+ * goes through the account.
+ */
+struct ControlLogin {
+    std::string username;
+    std::string password;
+    uint16_t port = 3493;
+    std::string ups;      // the NUT name of the UPS ("ups")
+    std::string address;  // the stick's IPv4 address on its network
+};
+
+// {"agentVersion":..,"status":{..}[,"control":{..}]} for /v1/agent/heartbeat
 std::string heartbeatBody(const std::string& fw_version, uint64_t started_at_ms, const char* link,
-                          const char* ups_status);
+                          const char* ups_status, const ControlLogin* control = nullptr);
 
 /**
  * @brief A shown code, kept across the restart that ends the setup network: the code on

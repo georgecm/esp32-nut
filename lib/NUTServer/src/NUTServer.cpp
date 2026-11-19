@@ -523,7 +523,9 @@ void NUTServer::processCommand(Print& client, int slot, const String& cmdLine) {
         String password = tokens[1];
         // Sent, right or wrong: LOGIN, SET and INSTCMD then answer ACCESS-DENIED, not PASSWORD-REQUIRED
         _clientPasswordSet[slot] = true;
-        if (_clientUsername[slot] == _config.username && password == _config.password) {
+        bool control = _control_username.length() && _control_password.length() &&
+                       _clientUsername[slot] == _control_username && password == _control_password;
+        if ((_clientUsername[slot] == _config.username && password == _config.password) || control) {
             _clientAuthenticated[slot] = true;
             client.print("OK\n");
         } else {

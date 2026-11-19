@@ -38,6 +38,12 @@ public:
 
     // Inizializza il server TCP e memorizza la configurazione e le dipendenze
     bool begin(const NUTServerConfig& config, IUpsSource* usb_ups, uint16_t port = NUT_DEFAULT_PORT);
+    // A second login the server accepts besides the configured one: the stick's control
+    // login, which the cloud hands to the account's apps (Tescom Connect)
+    void setControlLogin(const String& username, const String& password) {
+        _control_username = username;
+        _control_password = password;
+    }
     
     // Esegue la gestione non bloccante delle connessioni e dei comandi
     void loop();
@@ -129,6 +135,8 @@ private:
 #endif
     bool _clientActive[NUT_MAX_CLIENTS];
     bool _clientAuthenticated[NUT_MAX_CLIENTS];
+    String _control_username;
+    String _control_password;
     uint32_t _clientLastActivity[NUT_MAX_CLIENTS];
     String _clientBuffer[NUT_MAX_CLIENTS];
     String _clientUsername[NUT_MAX_CLIENTS];

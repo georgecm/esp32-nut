@@ -249,6 +249,15 @@ void setup() {
         nut_server.setLogCallback([](const char* level, const char* msg) {
             AppLogger::log(level, "%s", msg);
         });
+#ifdef ENABLE_CLOUD_CLAIM
+        {
+            // The account's apps on this network run commands with it (the cloud hands it out)
+            String control_user, control_pass;
+            CloudClient::controlLogin(control_user, control_pass);
+            nut_server.setControlLogin(control_user, control_pass);
+            cloud_client.setControlUps(nut_config.ups_name);
+        }
+#endif
         if (!nut_server.begin(nut_server_config, &usb_ups)) {
             AppLogger::log("ERROR", "[MAIN] ERROR: NUTServer initialization failed!");
         } else {

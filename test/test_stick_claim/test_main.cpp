@@ -131,6 +131,30 @@ void test_heartbeat_body(void) {
     TEST_ASSERT_EQUAL_STRING("ok", doc["status"]["link"]);
     TEST_ASSERT_EQUAL_STRING("OL CHRG", doc["status"]["upsStatus"]);
     TEST_ASSERT_TRUE(doc["status"]["startedAtMs"].as<uint64_t>() == 1700000000000ULL);
+    TEST_ASSERT_TRUE(doc["control"].isNull());
+}
+
+void test_heartbeat_body_with_control(void) {
+    ControlLogin login;
+    login.username = "tescom-connect";
+    login.password = "s3cret";
+    login.ups = "ups";
+    login.address = "192.168.1.76";
+    JsonDocument doc;
+    TEST_ASSERT_FALSE(deserializeJson(doc, heartbeatBody("1.13.0", 0, "ok", "OL", &login)));
+    TEST_ASSERT_EQUAL_STRING("tescom-connect", doc["control"]["username"]);
+    TEST_ASSERT_EQUAL_STRING("s3cret", doc["control"]["password"]);
+    TEST_ASSERT_EQUAL(3493, doc["control"]["port"].as<int>());
+    TEST_ASSERT_EQUAL_STRING("ups", doc["control"]["ups"][0]);
+    TEST_ASSERT_EQUAL_STRING("192.168.1.76", doc["control"]["addresses"][0]);
+    // Before the network has an address: the login, no address
+    login.address = "0.0.0.0";
+    TEST_ASSERT_FALSE(deserializeJson(doc, heartbeatBody("1.13.0", 0, "ok", "OL", &login)));
+    TEST_ASSERT_EQUAL(0, doc["control"]["addresses"].size());
+    // No password yet: no control at all
+    login.password = "";
+    TEST_ASSERT_FALSE(deserializeJson(doc, heartbeatBody("1.13.0", 0, "ok", "OL", &login)));
+    TEST_ASSERT_TRUE(doc["control"].isNull());
 }
 
 void test_approved_without_zabbix_yet(void) {
@@ -236,6 +260,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_refused_start_backs_off);
     RUN_TEST(test_restore_and_reset);
     RUN_TEST(test_heartbeat_body);
+    RUN_TEST(test_heartbeat_body_with_control);
     RUN_TEST(test_approved_without_zabbix_yet);
     RUN_TEST(test_pre_approved_start_polls_soon);
     RUN_TEST(test_heartbeat_answer);
