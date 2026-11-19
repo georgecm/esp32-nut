@@ -14,7 +14,8 @@
         "productid": "0000",
         "langid_fix": "0x0409",
         "novendor": true,
-        "noscanlangid": true
+        "noscanlangid": true,
+        "pollfreq": "2"
       },
       "match": [
         [
@@ -50,6 +51,7 @@
         "override.input.frequency.nominal": "50",
         "override.input.current.nominal": "4.0",
         "pollinterval": "2",
+        "pollfreq": "2",
         "battery_voltage_reports_one_pack": true,
         "override.battery.packs": "48",
         "override.battery.voltage.nominal": "25.6",
@@ -130,7 +132,8 @@
         "productid": "0000",
         "langid_fix": "0x0409",
         "novendor": true,
-        "noscanlangid": true
+        "noscanlangid": true,
+        "pollfreq": "2"
       },
       "match": [
         [
