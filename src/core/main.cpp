@@ -19,6 +19,9 @@
 #include "network/tls_gate.h"
 #ifdef ENABLE_CLOUD_CLAIM
 #include "network/cloud_client.h"
+#ifdef SETUP_BUTTON_PIN
+#include "SetupButton.h"
+#endif
 #endif
 
 USBHostUPS usb_ups;
@@ -85,6 +88,18 @@ void usbDiagBegin();  // src/core/usb_diag.cpp
 
 // Manual AP mode: back to STA after 10 minutes without stations (US-064)
 ApIdleTimeout ap_timeout;
+#ifdef SETUP_BUTTON_PIN
+// Held 10 s while running: the setup network, as the double reset (docs/tescom-stick.md)
+SetupButton setup_button;
+#endif
+
+// The LED's state, or a fast blink while the setup button is held
+static LedState ledState() {
+#ifdef SETUP_BUTTON_PIN
+    if (setup_button.holding(millis())) return ERROR;
+#endif
+    return computeSystemState(network_mgr.isConnected(), usb_ups.isConnected());
+}
 
 // Task watchdog on the loopTask (issue #47). It replaces a hw_timer whose ISR called
 // esp_restart(): unsafe from an ISR, and unable to fire during a panic, when interrupts
@@ -137,6 +152,9 @@ void setup() {
 
     // Inizializzazione del LED diagnostico (pin dal profilo della scheda, US-090)
     diagnostic_led.begin(board().led.pin, board().led.power_pin);
+#ifdef SETUP_BUTTON_PIN
+    pinMode(SETUP_BUTTON_PIN, INPUT_PULLUP);
+#endif
     BoardSettings board_settings = board_settings_store.load(board());
     diagnostic_led.setBrightness(ledBrightness(board_settings.led_level));
     diagnostic_led.setUserEnabled(board_settings.led_on);
@@ -210,6 +228,7 @@ void setup() {
         // Inizializzazione di AppNetworkManager
         network_mgr.begin(board(), net_plan, wifi.ssid, wifi.password, saved_hostname);
         web_server.setUPS(&usb_ups);
+        web_server.setMdns(&mdns_announcer);
         web_server.begin(false);
     }
     // Boards without Wi-Fi have no AP: the double reset opens the recovery window (US-091)
@@ -277,6 +296,16 @@ void loop() {
     uint32_t now = millis();
 
     esp_task_wdt_reset();
+
+#ifdef SETUP_BUTTON_PIN
+    if (setup_button.update(digitalRead(SETUP_BUTTON_PIN) == LOW, now)) {
+        // The next boot reads the flag as the double reset leaves it: the setup network
+        AppLogger::log("WARN", "[MAIN] Setup button held 10 s: restarting into the setup network");
+        boot_prefs.putBool("manual_ap", true);
+        delay(200);
+        ESP.restart();
+    }
+#endif
 
     // Check timer per azzeramento flag manual_ap
     if (clear_ap_flag_pending && (now - boot_time_ms > 3000)) {
@@ -366,7 +395,7 @@ void loop() {
             AppLogger::log("WARN", "[MAIN] WARNING: System in safe waiting mode. Configuration missing or invalid!");
         }
         
-        diagnostic_led.setState(computeSystemState(network_mgr.isConnected(), usb_ups.isConnected()));
+        diagnostic_led.setState(ledState());
         diagnostic_led.update();
         delay(10);
         return;
@@ -421,7 +450,7 @@ void loop() {
     }
 
     // Aggiornamento stato LED diagnostico
-    diagnostic_led.setState(computeSystemState(network_mgr.isConnected(), usb_ups.isConnected()));
+    diagnostic_led.setState(ledState());
     diagnostic_led.update();
 
     delay(10);

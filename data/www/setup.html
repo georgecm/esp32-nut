@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tescom Connect Link</title>
+<!-- The setup page of the Tescom Connect Link (docs/tescom-stick.md, "Setup"): served at /
+     on the setup network. Self-contained: the phone on the setup network has no internet.
+     Nothing else is set here: the Tescom Connect app does the rest. -->
+<style>
+:root{--bg:#17181c;--panel:#202126;--hover:#292b32;--line:#303138;--control:#3b3e47;--text:#f0f1f4;--muted:#969ba7;--faint:#6b6f7a;--blue:#3695ff;--blue-hover:#6db3ff;--green:#5bbc91;--red:#e5695f;--radius:8px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:440px;margin:0 auto;padding:28px 16px 40px}
+header{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;margin-bottom:22px}
+header svg{width:44px;height:44px}
+h1{font-size:22px;font-weight:600;margin:0}
+.sub{color:var(--muted);margin:0}
+.steps{display:flex;justify-content:center;gap:8px;margin:0 0 20px;padding:0;list-style:none;font-size:13px;color:var(--faint)}
+.steps li{display:flex;align-items:center;gap:6px}
+.steps li+li::before{content:"";width:28px;height:1px;background:var(--line);margin-right:2px}
+.steps b{display:inline-flex;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--control);align-items:center;justify-content:center;font-weight:600}
+.steps .now{color:var(--text)}.steps .now b{border-color:var(--blue);color:var(--blue)}
+.steps .done b{background:var(--green);border-color:var(--green);color:#0f1a14}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+h2{font-size:18px;font-weight:600;margin:0 0 4px}
+.muted{color:var(--muted)}.small{font-size:14px}
+ul.nets{list-style:none;margin:14px 0 0;padding:0;max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius)}
+ul.nets li{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;border-top:1px solid var(--line)}
+ul.nets li:first-child{border-top:0}
+ul.nets li:hover,ul.nets li.sel{background:var(--hover)}
+ul.nets li.sel{box-shadow:inset 3px 0 0 var(--blue)}
+.lock{width:14px;height:14px;color:var(--muted)}
+.grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px}
+.bars i{width:3px;background:var(--control);border-radius:1px}
+.bars i.on{background:var(--text)}
+label{display:block;font-size:14px;color:var(--muted);margin:16px 0 6px}
+input{width:100%;padding:12px;border-radius:var(--radius);border:1px solid var(--control);background:#1a1b1f;color:var(--text);font:inherit}
+input:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:transparent}
+.pw{position:relative}.pw button{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--blue);font:inherit;font-size:14px;cursor:pointer;padding:6px}
+a.btn{display:block;text-align:center;text-decoration:none;box-sizing:border-box}
+button.primary,a.primary{width:100%;margin-top:18px;padding:13px;border:0;border-radius:var(--radius);background:var(--blue);color:#0b1220;font:inherit;font-weight:600;cursor:pointer}
+button.primary:hover,a.primary:hover{background:var(--blue-hover)}
+button.primary:disabled{opacity:.5;cursor:default}
+a.btn.wait{opacity:.5;pointer-events:none}
+.back{border:1px solid var(--blue);border-radius:var(--radius);padding:12px 14px;margin:14px 0;text-align:left}
+.back p{margin:4px 0 0;color:var(--muted)}
+.back.done{border-color:var(--green)}
+button.link{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;padding:0}
+.row{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
+.err{color:var(--red);margin:12px 0 0;font-size:14px}
+.center{text-align:center}
+.spin{width:36px;height:36px;margin:8px auto 14px;border:3px solid var(--control);border-top-color:var(--blue);border-radius:50%;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+.ok{width:44px;height:44px;margin:4px auto 12px;border-radius:50%;background:var(--green);color:#0f1a14;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700}
+ol{padding-left:20px;margin:10px 0 0}ol li{margin:6px 0}
+footer{margin-top:22px;text-align:center;font-size:14px}
+footer a{color:var(--muted)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 317 317" aria-hidden="true"><path d="M130.014 11.7158C145.635 -3.90501 170.961 -3.9051 186.582 11.7158L304.88 130.014C320.501 145.635 320.501 170.961 304.88 186.582L186.582 304.88C170.961 320.501 145.635 320.501 130.014 304.88L11.7158 186.582C-3.90515 170.961 -3.90515 145.635 11.7158 130.014L130.014 11.7158ZM166.066 91.6992C166.066 81.5617 153.774 76.485 146.585 83.6533L79.7734 150.279C75.3173 154.723 75.3178 161.928 79.7744 166.371L146.59 232.992C153.779 240.16 166.071 235.083 166.07 224.945L166.066 91.6992ZM192.666 122.889C189.258 119.491 183.431 121.897 183.432 126.703L183.434 189.867C183.434 194.672 189.26 197.079 192.668 193.681L224.34 162.098C226.452 159.991 226.452 156.576 224.34 154.47L192.666 122.889Z" fill="#f0f1f4"/></svg>
+    <h1>Set up your Tescom Connect Link</h1>
+    <p class="sub">It brings your UPS to Tescom Connect over Wi-Fi.</p>
+  </header>
+  <ol class="steps" id="steps"><li id="st1" class="now"><b>1</b>Wi-Fi</li><li id="st2"><b>2</b>The app</li></ol>
+
+  <!-- 1. The Wi-Fi -->
+  <section class="card" id="v-wifi">
+    <h2>Choose your Wi-Fi</h2>
+    <p class="muted small">The Link joins it to reach Tescom Connect. 2.4 GHz networks only.</p>
+    <ul class="nets" id="nets"><li class="muted">Looking for networks…</li></ul>
+    <div class="row"><button class="link small" id="rescan" type="button">Look again</button><button class="link small" id="other" type="button">Network not listed</button></div>
+    <form id="f">
+      <div id="ssid-box" hidden><label for="ssid">Network name</label><input id="ssid" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+      <div id="pw-box" hidden><label for="pw">Password for <span id="pw-name"></span></label>
+        <div class="pw"><input id="pw" type="password" autocomplete="off"><button type="button" id="show">Show</button></div></div>
+      <p class="err" id="err" hidden></p>
+      <button class="primary" id="go" type="submit" disabled>Connect</button>
+    </form>
+  </section>
+
+  <!-- Joining -->
+  <section class="card center" id="v-join" hidden>
+    <div class="spin"></div>
+    <h2>Joining <span id="join-name"></span>…</h2>
+    <p class="muted small">This takes up to a minute. Keep this page open.</p>
+  </section>
+
+  <!-- 2. Tescom Connect -->
+  <section class="card" id="v-code" hidden>
+    <div class="ok">&#10003;</div>
+    <h2 class="center">Your Link is on <span id="home-wifi"></span></h2>
+    <p class="muted center small" id="lead-code">Everything else happens in the Tescom Connect app.</p>
+    <div class="back" id="back">
+      <b>Go back to <span class="home-name"></span></b>
+      <p class="small">This setup network has no internet and closes in a few seconds. Your phone should go back to <span class="home-name"></span> by itself. If it doesn't, choose <span class="home-name"></span> in Wi-Fi settings.</p>
+    </div>
+    <ol class="small">
+      <li>Get Tescom Connect on a computer on <b class="home-name"></b>, and open it.</li>
+      <li>It finds the Link and adds it to your account in one click.</li>
+    </ol>
+    <a class="primary btn wait" data-dl href="https://connect.tescom.gr/download" target="_blank" rel="noopener">Waiting for internet…</a>
+    <p class="muted small center">Or open <b>connect.tescom.gr/download</b> later.</p>
+  </section>
+
+  <section class="card center" id="v-owned" hidden>
+    <div class="ok">&#10003;</div>
+    <h2>All set</h2>
+    <p class="muted small">The Link is on <b class="home-name">your Wi-Fi</b> and already in <b id="org">your</b> Tescom Connect account.</p>
+    <div class="back" id="back-owned">
+      <b>Go back to <span class="home-name">your Wi-Fi</span></b>
+      <p class="small">This setup network has no internet and closes in a few seconds. If your phone doesn't go back by itself, choose your Wi-Fi in settings.</p>
+    </div>
+    <a class="primary btn wait" data-dl href="https://connect.tescom.gr/download" target="_blank" rel="noopener">Waiting for internet…</a>
+    <p class="muted small">Or open <b>connect.tescom.gr/download</b> later.</p>
+  </section>
+
+</main>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var chosen = null, other = false, scanTimer = null;
+
+  function show(view) {
+    ["v-wifi", "v-join", "v-code", "v-owned"].forEach(function (v) { $(v).hidden = v !== view; });
+    var second = view === "v-code" || view === "v-owned";
+    $("st1").className = second ? "done" : "now";
+    $("st2").className = view === "v-owned" ? "done" : second ? "now" : "";
+  }
+  function err(text) { $("err").textContent = text || ""; $("err").hidden = !text; }
+  function bars(rssi) {
+    var n = rssi > -55 ? 4 : rssi > -67 ? 3 : rssi > -78 ? 2 : 1, h = "";
+    for (var i = 1; i <= 4; i++) h += '<i class="' + (i <= n ? "on" : "") + '" style="height:' + (3 * i + 2) + 'px"></i>';
+    return '<span class="bars" aria-label="Signal ' + n + ' of 4">' + h + "</span>";
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function ready() {
+    var name = other ? $("ssid").value.trim() : chosen && chosen.ssid;
+    $("go").disabled = !name;
+  }
+  function pick(net) {
+    chosen = net; other = false;
+    $("ssid-box").hidden = true;
+    $("pw-box").hidden = !net.secure;
+    $("pw-name").textContent = net.ssid;
+    $("pw").value = "";
+    [].forEach.call($("nets").children, function (li) { li.classList.toggle("sel", li.dataset.ssid === net.ssid); });
+    if (net.secure) $("pw").focus();
+    err(""); ready();
+  }
+  function scan() {
+    clearTimeout(scanTimer);
+    fetch("/api/wifi/scan", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.scanning) { scanTimer = setTimeout(scan, 1500); return; }
+      var nets = d.networks || [];
+      if (!nets.length) { $("nets").innerHTML = '<li class="muted">No networks found. Look again, or type its name.</li>'; return; }
+      $("nets").innerHTML = nets.map(function (n) {
+        return '<li data-ssid="' + esc(n.ssid) + '">' + bars(n.rssi) + '<span class="grow">' + esc(n.ssid) + "</span>" + (n.secure ? '<svg class="lock" viewBox="0 0 16 16" aria-label="Needs a password"><rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>' : "") + "</li>";
+      }).join("");
+      [].forEach.call($("nets").children, function (li, i) { li.onclick = function () { pick(nets[i]); }; });
+      if (chosen) [].forEach.call($("nets").children, function (li) { li.classList.toggle("sel", li.dataset.ssid === chosen.ssid); });
+    }).catch(function () { scanTimer = setTimeout(scan, 3000); });
+  }
+  $("rescan").onclick = function () { $("nets").innerHTML = '<li class="muted">Looking for networks…</li>'; fetch("/api/wifi/scan?again=1", { cache: "no-store" }).finally(scan); };
+  $("other").onclick = function () {
+    other = true; chosen = null;
+    [].forEach.call($("nets").children, function (li) { li.classList.remove("sel"); });
+    $("ssid-box").hidden = false; $("pw-box").hidden = false; $("pw-name").textContent = "it";
+    $("ssid").focus(); ready();
+  };
+  $("ssid").oninput = ready;
+  $("show").onclick = function () { var p = $("pw"); p.type = p.type === "password" ? "text" : "password"; this.textContent = p.type === "password" ? "Show" : "Hide"; };
+
+  var joinedName = "";
+  $("f").onsubmit = function (e) {
+    e.preventDefault();
+    var ssid = other ? $("ssid").value.trim() : chosen.ssid;
+    var pw = $("pw").value;
+    if ((other || chosen.secure) && pw && pw.length < 8) { err("A Wi-Fi password has at least 8 characters."); return; }
+    err(""); $("go").disabled = true;
+    fetch("/api/wifi/connect", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ssid: ssid, password: pw }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.d.success) throw new Error(x.d.error || "not saved");
+        joinedName = ssid;
+        $("join-name").textContent = ssid; $("home-wifi").textContent = ssid;
+        [].forEach.call(document.querySelectorAll(".home-name"), function (el) { el.textContent = ssid; });
+        show("v-join");
+        watch(Date.now());
+      })
+      .catch(function () { err("The Link couldn't save the Wi-Fi. Try again."); ready(); });
+  };
+
+  // After the Wi-Fi is saved: the Link joins it with this network still up, then points to the app
+  function watch(started) {
+    fetch("/api/claim", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (c) {
+      if (c.state === "claimed") { $("org").textContent = c.organization || "your"; show("v-owned"); online(); return; }
+      if ((c.state === "pending" && c.userCode) || (c.connected && c.state !== "off")) {
+        show("v-code"); online();
+        return;
+      }
+      if (Date.now() - started > 75000 && !c.connected) {
+        show("v-wifi"); err("The Link couldn't join " + joinedName + ". Check the password and try again."); ready(); return;
+      }
+      setTimeout(function () { watch(started); }, 1500);
+    }).catch(function () {
+      // The setup network closed (the Link restarted on the Wi-Fi), or the phone left it
+      if ($("v-code").hidden && $("v-owned").hidden) setTimeout(function () { watch(started); }, 3000);
+    });
+  }
+
+  // The download needs the internet: the button wakes up once the phone is back on its Wi-Fi
+  var probing = false;
+  function online() {
+    if (probing) return;
+    probing = true;
+    (function probe() {
+      fetch("https://connect.tescom.gr/download?probe=" + Date.now(), { mode: "no-cors", cache: "no-store" })
+        .then(function () {
+          [].forEach.call(document.querySelectorAll("[data-dl]"), function (a) { a.classList.remove("wait"); a.textContent = "Get Tescom Connect"; });
+          [].forEach.call(document.querySelectorAll(".back"), function (b) { b.classList.add("done"); b.querySelector("b").textContent = "You're back online"; b.querySelector("p").hidden = true; });
+        })
+        .catch(function () { setTimeout(probe, 2000); });
+    })();
+  }
+
+  scan();
+})();
+</script>
+</body>
+</html>

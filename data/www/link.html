@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tescom Connect Link</title>
+<!-- The status page of the Tescom Connect Link (docs/tescom-stick.md, "Setup"): served at / on the
+     Wi-Fi: what the Link is doing, and where to manage it (the Tescom Connect app). -->
+<style>
+:root{--bg:#17181c;--panel:#202126;--hover:#292b32;--line:#303138;--control:#3b3e47;--text:#f0f1f4;--muted:#969ba7;--faint:#6b6f7a;--blue:#3695ff;--blue-hover:#6db3ff;--green:#5bbc91;--red:#e5695f;--radius:8px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:440px;margin:0 auto;padding:28px 16px 40px}
+header{display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;margin-bottom:22px}
+header svg{width:44px;height:44px}
+h1{font-size:22px;font-weight:600;margin:0}
+.sub{color:var(--muted);margin:0}
+.steps{display:flex;justify-content:center;gap:8px;margin:0 0 20px;padding:0;list-style:none;font-size:13px;color:var(--faint)}
+.steps li{display:flex;align-items:center;gap:6px}
+.steps li+li::before{content:"";width:28px;height:1px;background:var(--line);margin-right:2px}
+.steps b{display:inline-flex;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--control);align-items:center;justify-content:center;font-weight:600}
+.steps .now{color:var(--text)}.steps .now b{border-color:var(--blue);color:var(--blue)}
+.steps .done b{background:var(--green);border-color:var(--green);color:#0f1a14}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+h2{font-size:18px;font-weight:600;margin:0 0 4px}
+.muted{color:var(--muted)}.small{font-size:14px}
+ul.nets{list-style:none;margin:14px 0 0;padding:0;max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:var(--radius)}
+ul.nets li{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;border-top:1px solid var(--line)}
+ul.nets li:first-child{border-top:0}
+ul.nets li:hover,ul.nets li.sel{background:var(--hover)}
+ul.nets li.sel{box-shadow:inset 3px 0 0 var(--blue)}
+.lock{width:14px;height:14px;color:var(--muted)}
+.grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px}
+.bars i{width:3px;background:var(--control);border-radius:1px}
+.bars i.on{background:var(--text)}
+label{display:block;font-size:14px;color:var(--muted);margin:16px 0 6px}
+input{width:100%;padding:12px;border-radius:var(--radius);border:1px solid var(--control);background:#1a1b1f;color:var(--text);font:inherit}
+input:focus{outline:2px solid var(--blue);outline-offset:-1px;border-color:transparent}
+.pw{position:relative}.pw button{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;color:var(--blue);font:inherit;font-size:14px;cursor:pointer;padding:6px}
+a.btn{display:block;text-align:center;text-decoration:none;box-sizing:border-box}
+button.primary,a.primary{width:100%;margin-top:18px;padding:13px;border:0;border-radius:var(--radius);background:var(--blue);color:#0b1220;font:inherit;font-weight:600;cursor:pointer}
+button.primary:hover,a.primary:hover{background:var(--blue-hover)}
+button.primary:disabled{opacity:.5;cursor:default}
+button.link{background:none;border:0;color:var(--blue);font:inherit;cursor:pointer;padding:0}
+.row{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
+.err{color:var(--red);margin:12px 0 0;font-size:14px}
+.center{text-align:center}
+.spin{width:36px;height:36px;margin:8px auto 14px;border:3px solid var(--control);border-top-color:var(--blue);border-radius:50%;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+.ok{width:44px;height:44px;margin:4px auto 12px;border-radius:50%;background:var(--green);color:#0f1a14;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700}
+ol{padding-left:20px;margin:10px 0 0}ol li{margin:6px 0}
+footer{margin-top:22px;text-align:center;font-size:14px}
+footer a{color:var(--muted)}
+[hidden]{display:none!important}
+dl{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;margin:14px 0 0}
+dt{color:var(--muted);font-size:14px}dd{margin:0;text-align:right;font-size:15px;overflow-wrap:anywhere}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--faint)}
+.dot.g{background:var(--green)}.dot.r{background:var(--red)}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <svg viewBox="0 0 317 317" aria-hidden="true"><path d="M130.014 11.7158C145.635 -3.90501 170.961 -3.9051 186.582 11.7158L304.88 130.014C320.501 145.635 320.501 170.961 304.88 186.582L186.582 304.88C170.961 320.501 145.635 320.501 130.014 304.88L11.7158 186.582C-3.90515 170.961 -3.90515 145.635 11.7158 130.014L130.014 11.7158ZM166.066 91.6992C166.066 81.5617 153.774 76.485 146.585 83.6533L79.7734 150.279C75.3173 154.723 75.3178 161.928 79.7744 166.371L146.59 232.992C153.779 240.16 166.071 235.083 166.07 224.945L166.066 91.6992ZM192.666 122.889C189.258 119.491 183.431 121.897 183.432 126.703L183.434 189.867C183.434 194.672 189.26 197.079 192.668 193.681L224.34 162.098C226.452 159.991 226.452 156.576 224.34 154.47L192.666 122.889Z" fill="#f0f1f4"/></svg>
+    <h1>Tescom Connect Link</h1>
+    <p class="sub" id="lead">Reading…</p>
+  </header>
+  <section class="card">
+    <h2>Status</h2>
+    <dl>
+      <dt>UPS</dt><dd id="ups">—</dd>
+      <dt>Power</dt><dd id="status">—</dd>
+      <dt>Wi-Fi</dt><dd id="wifi">—</dd>
+      <dt>Address</dt><dd id="address">—</dd>
+      <dt>Account</dt><dd id="account">—</dd>
+      <dt>Firmware</dt><dd id="fw">—</dd>
+    </dl>
+  </section>
+  <section class="card" style="margin-top:14px">
+    <h2>Manage it in Tescom Connect</h2>
+    <p class="muted small">Readings, history, battery tests and alerts are in the Tescom Connect app. On a computer on this Wi-Fi, it finds the Link by itself.</p>
+    <a class="primary btn" href="https://connect.tescom.gr/download" target="_blank" rel="noopener">Get Tescom Connect</a>
+  </section>
+  <p class="muted small center" style="margin-top:18px">To move the Link to another Wi-Fi, hold its button for 10 seconds.</p>
+</main>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function words(st) {
+    var f = (st || "").split(/\s+/);
+    if (f.indexOf("OB") >= 0) return f.indexOf("LB") >= 0 ? ["On battery, low", "r"] : ["On battery", "r"];
+    if (f.indexOf("CAL") >= 0) return ["Battery test running", "g"];
+    if (f.indexOf("BYPASS") >= 0) return ["On bypass", "r"];
+    if (f.indexOf("OL") >= 0) return ["On grid", "g"];
+    return [st || "No status", ""];
+  }
+  function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function load() {
+    fetch("/api/link", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (d) {
+      $("wifi").textContent = d.wifi || "—";
+      // The easy name when this Link has it; the number can change when the router restarts
+      $("address").innerHTML = d.name ? esc(d.name) + '<br><span class="muted small">' + esc(d.address || "") + "</span>" : esc(d.address || "—");
+      $("fw").textContent = d.firmware || "—";
+      $("account").textContent = d.account ? d.account : "Not added yet";
+      if (d.ups) {
+        var w = words(d.ups.status);
+        $("ups").textContent = d.ups.model || "UPS";
+        $("status").innerHTML = '<span class="dot ' + w[1] + '"></span>' + w[0] + (d.ups.charge ? " · " + d.ups.charge + " %" : "");
+        $("lead").textContent = "Reading your UPS.";
+      } else {
+        $("ups").textContent = "Not connected";
+        $("status").textContent = "—";
+        $("lead").textContent = "No UPS on its cable. Plug the UPS's USB cable into the Link.";
+      }
+    }).catch(function () { $("lead").textContent = "The Link didn't answer. Reload the page."; });
+  }
+  load();
+  setInterval(load, 5000);
+})();
+</script>
+</body>
+</html>

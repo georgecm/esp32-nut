@@ -2014,6 +2014,38 @@ void test_inactivity_close_is_logged(void) {
 }
 
 #ifndef ARDUINO
+// The Link: no login set on its page, only its control login (handed to the app by the cloud)
+void test_control_login_is_needed_for_commands(void) {
+    NUTServer link;
+    NUTServerConfig config;
+    config.ups_name = "testups";
+    link.begin(config, &mockHost, 3493);
+    // Without any login, commands need none (an esp32-nut with no NUT user)
+    printer.clear();
+    link.processCommand(printer, 0, "INSTCMD testups beeper.mute");
+    TEST_ASSERT_TRUE(printer.getOutput().find("USERNAME-REQUIRED") == std::string::npos);
+    // With the control login, they need it
+    link.setControlLogin("tescom-connect", "s3cretpassword123");
+    NUTServer link2;
+    link2.begin(config, &mockHost, 3493);
+    link2.setControlLogin("tescom-connect", "s3cretpassword123");
+    printer.clear();
+    link2.processCommand(printer, 1, "INSTCMD testups beeper.mute");
+    TEST_ASSERT_EQUAL_STRING("ERR USERNAME-REQUIRED\n", printer.getOutput().c_str());
+    printer.clear();
+    link2.processCommand(printer, 1, "USERNAME tescom-connect");
+    printer.clear();
+    link2.processCommand(printer, 1, "PASSWORD wrong");
+    TEST_ASSERT_EQUAL_STRING("ERR ACCESS-DENIED\n", printer.getOutput().c_str());
+    printer.clear();
+    link2.processCommand(printer, 1, "PASSWORD s3cretpassword123");
+    TEST_ASSERT_EQUAL_STRING("OK\n", printer.getOutput().c_str());
+    printer.clear();
+    link2.processCommand(printer, 1, "INSTCMD testups beeper.mute");
+    TEST_ASSERT_TRUE(printer.getOutput().find("ACCESS-DENIED") == std::string::npos);
+    TEST_ASSERT_TRUE(printer.getOutput().find("REQUIRED") == std::string::npos);
+}
+
 int main(int argc, char **argv) {
     UNITY_BEGIN();
     RUN_TEST(test_split_tokens);
@@ -2047,6 +2079,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_instcmd_driver_not_connected);
     RUN_TEST(test_instcmd_write_failed);
     RUN_TEST(test_instcmd_requires_login);
+    RUN_TEST(test_control_login_is_needed_for_commands);
     RUN_TEST(test_login_requires_credentials);
     RUN_TEST(test_instcmd_shutdown_sequences);
     RUN_TEST(test_instcmd_stayoff_writes_minus_one_as_twos_complement);

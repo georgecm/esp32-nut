@@ -5,6 +5,9 @@
 #include "AuthService.h"
 #include "UpsCommands.h"
 #include "network/web_config_server.h"
+#include "network/mdns_announcer.h"
+#include <algorithm>
+#include <vector>
 #include <ArduinoJson.h>
 #include "core/app_logger.h"
 #include "core/crash_diag.h"
@@ -75,18 +78,26 @@ void WebConfigServer::begin(bool isAPMode) {
     if (_handlers_registered) return;
     _handlers_registered = true;
 
+#ifdef LINK_WEB
+    registerLinkRoutes();
+    return;
+#endif
+
     // Ogni rotta passa dal guard (ADR 0009): in AP è tutto aperto, in STA rispondono
     // senza sessione solo le rotte pubbliche elencate in AuthPolicy
 
-    // Serve explicitly the index.html on root
+    // The root: on the Tescom Connect Link's setup network its own setup page (Wi-Fi, then
+    // the Tescom Connect code); otherwise, and at /advanced, the full settings
     server.on("/", HTTP_GET, guarded([this]() {
-        server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-        server.sendHeader("Pragma", "no-cache");
-        server.sendHeader("Expires", "-1");
-        server.sendHeader("Content-Encoding", "gzip");
-        server.send_P(200, "text/html", (const char*)web_asset_index_inlined_html, web_asset_index_inlined_html_len);
+        if (is_ap_mode && setup_cloud && board().has_wifi) {
+            server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            server.sendHeader("Content-Encoding", "gzip");
+            server.send_P(200, "text/html", (const char*)web_asset_setup_html, web_asset_setup_html_len);
+            return;
+        }
+        sendIndex();
     }));
-
+    server.on("/advanced", HTTP_GET, guarded([this]() { sendIndex(); }));
     server.on("/index.html", HTTP_GET, guarded([this]() {
         server.sendHeader("Location", "/", true);
         server.send(301, "text/plain", "");
@@ -97,6 +108,7 @@ void WebConfigServer::begin(bool isAPMode) {
     // Boards without Wi-Fi have no Wi-Fi settings: the route is not registered (404, US-092)
     if (board().has_wifi) {
         server.on("/api/wifi/connect", HTTP_POST, guarded([this]() { handleConnect(); }));
+        server.on("/api/wifi/scan", HTTP_GET, guarded([this]() { handleWifiScan(); }));
     }
     server.on("/api/nut/config", HTTP_POST, guarded([this]() { handleNutConfig(); }));
     // Board page (US-094): not public in AuthPolicy, so protected by the login
@@ -108,22 +120,7 @@ void WebConfigServer::begin(bool isAPMode) {
     server.on("/api/zabbix", HTTP_GET, guarded([this]() { handleGetZabbix(); }));
     server.on("/api/zabbix", HTTP_POST, guarded([this]() { handleSetZabbix(); }));
     // Tescom Connect claim (docs/tescom-stick.md): the code, public in AuthPolicy; unlink needs the login
-    server.on("/api/claim", HTTP_GET, guarded([this]() {
-        if (!cloud_client) {
-            server.send(200, "application/json", "{\"state\":\"off\"}");
-            return;
-        }
-        server.sendHeader("Cache-Control", "no-store");
-        String body = cloud_client->statusJson();
-        if (setup_hold.active()) {
-            // The setup page read the code (or "already in an account"): the setup network
-            // closes a little later. setupS: at most how long it stays up
-            if (cloud_client->hasAnswer()) setup_hold.answerSeen(millis());
-            body.remove(body.length() - 1);
-            body += ",\"setupS\":" + String(setup_hold.leftS(millis())) + "}";
-        }
-        server.send(200, "application/json", body);
-    }));
+    server.on("/api/claim", HTTP_GET, guarded([this]() { sendClaim(); }));
     server.on("/api/claim/unlink", HTTP_POST, guarded([this]() {
         if (!cloud_client) {
             server.send(404, "application/json", "{\"error\":\"Tescom Connect is not in this firmware\"}");
@@ -467,6 +464,76 @@ void WebConfigServer::handleConnect() {
     } else {
         server.send(500, "application/json", "{\"error\": \"Failed to save config\"}");
     }
+}
+
+void WebConfigServer::sendClaim() {
+    if (!cloud_client) {
+        server.send(200, "application/json", "{\"state\":\"off\"}");
+        return;
+    }
+    server.sendHeader("Cache-Control", "no-store");
+    String body = cloud_client->statusJson();
+    if (setup_hold.active()) {
+        // The setup page read the code (or "already in an account"): the setup network
+        // closes a little later. setupS: at most how long it stays up
+        if (cloud_client->hasAnswer()) setup_hold.answerSeen(millis());
+        body.remove(body.length() - 1);
+        body += ",\"setupS\":" + String(setup_hold.leftS(millis())) + "}";
+    }
+    server.send(200, "application/json", body);
+}
+
+void WebConfigServer::sendIndex() {
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    server.sendHeader("Pragma", "no-cache");
+    server.sendHeader("Expires", "-1");
+    server.sendHeader("Content-Encoding", "gzip");
+    server.send_P(200, "text/html", (const char*)web_asset_index_inlined_html, web_asset_index_inlined_html_len);
+}
+
+void WebConfigServer::handleWifiScan() {
+    // Only where it is used: the setup network (in STA the link has a Wi-Fi already)
+    if (!is_ap_mode) {
+        server.send(404, "application/json", "{\"error\":\"Not on the setup network\"}");
+        return;
+    }
+    server.sendHeader("Cache-Control", "no-store");
+    int n = WiFi.scanComplete();
+    if (server.hasArg("again") && n != WIFI_SCAN_RUNNING) {
+        WiFi.scanDelete();
+        n = WIFI_SCAN_FAILED;
+    }
+    if (n == WIFI_SCAN_FAILED) {
+        // A scan needs the station interface next to the access point
+        if (!(WiFi.getMode() & WIFI_STA)) WiFi.mode(WIFI_AP_STA);
+        WiFi.scanNetworks(true, false);
+        server.send(200, "application/json", "{\"scanning\":true}");
+        return;
+    }
+    if (n == WIFI_SCAN_RUNNING) {
+        server.send(200, "application/json", "{\"scanning\":true}");
+        return;
+    }
+    // Strongest first, each name once, hidden networks left out
+    JsonDocument doc;
+    JsonArray list = doc["networks"].to<JsonArray>();
+    std::vector<int> order;
+    for (int i = 0; i < n; i++) order.push_back(i);
+    std::sort(order.begin(), order.end(), [](int a, int b) { return WiFi.RSSI(a) > WiFi.RSSI(b); });
+    std::vector<String> seen;
+    for (int i : order) {
+        String ssid = WiFi.SSID(i);
+        if (!ssid.length() || std::find(seen.begin(), seen.end(), ssid) != seen.end()) continue;
+        seen.push_back(ssid);
+        JsonObject o = list.add<JsonObject>();
+        o["ssid"] = ssid;
+        o["rssi"] = WiFi.RSSI(i);
+        o["secure"] = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+        if (seen.size() >= 30) break;
+    }
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
 }
 
 void WebConfigServer::startSetupHold(const String& ssid, const String& password) {
@@ -925,3 +992,69 @@ void WebConfigServer::handleAuthLogoutAll() {
     sendAuth(res);
 }
 
+#ifdef LINK_WEB
+void WebConfigServer::registerLinkRoutes() {
+    // Every route is open: nothing here changes the Link once it is on the Wi-Fi
+    server.on("/", HTTP_GET, [this]() {
+        server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+        server.sendHeader("Content-Encoding", "gzip");
+        if (is_ap_mode) {
+            server.send_P(200, "text/html", (const char*)web_asset_setup_html, web_asset_setup_html_len);
+        } else {
+            server.send_P(200, "text/html", (const char*)web_asset_link_html, web_asset_link_html_len);
+        }
+    });
+    // The Wi-Fi is set only on the setup network (hold BOOT 10 s, or the double reset)
+    server.on("/api/wifi/connect", HTTP_POST, [this]() {
+        if (!is_ap_mode) {
+            server.send(403, "application/json", "{\"error\":\"Only on the setup network\"}");
+            return;
+        }
+        handleConnect();
+    });
+    server.on("/api/wifi/scan", HTTP_GET, [this]() { handleWifiScan(); });
+    server.on("/api/claim", HTTP_GET, [this]() { sendClaim(); });
+    server.on("/api/link", HTTP_GET, [this]() { handleLinkStatus(); });
+    server.onNotFound([this]() {
+        if (is_ap_mode && network && server.hostHeader() != network->localIP()) {
+            server.sendHeader("Location", String("http://") + network->localIP() + "/", true);
+            server.send(302, "text/plain", "");
+        } else {
+            server.send(404, "text/plain", "Not found");
+        }
+    });
+    static const char* collectedHeaders[] = {"Content-Type"};
+    server.collectHeaders(collectedHeaders, 1);
+    server.begin();
+    AppLogger::log("INFO", "[WEB] Tescom Connect Link pages on port 80 (setup and status only)");
+}
+
+void WebConfigServer::handleLinkStatus() {
+    JsonDocument doc;
+    doc["firmware"] = FIRMWARE_VERSION;
+    doc["mac"] = WiFi.macAddress();
+    doc["wifi"] = is_ap_mode ? "" : WiFi.SSID();
+    doc["address"] = network ? network->localIP() : String("");
+    doc["name"] = mdns_announcer ? mdns_announcer->sharedName() : String("");
+    if (usb_ups && usb_ups->isConnected()) {
+        auto data = usb_ups->getUPSData();
+        String model = data.get().get("device.model");
+        String mfr = data.get().get("device.mfr");
+        doc["ups"]["model"] = (mfr.length() ? mfr + " " : String("")) + model;
+        doc["ups"]["status"] = usb_ups->getUPSStatusString();
+        doc["ups"]["charge"] = data.get().get("battery.charge");
+    } else {
+        doc["ups"] = nullptr;
+    }
+    if (cloud_client) {
+        JsonDocument claim;
+        if (!deserializeJson(claim, cloud_client->statusJson())) {
+            doc["account"] = claim["state"] == "claimed" ? claim["organization"].as<String>() : String("");
+        }
+    }
+    String out;
+    serializeJson(doc, out);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", out);
+}
+#endif

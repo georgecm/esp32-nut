@@ -2,11 +2,12 @@ import os
 import glob
 import gzip
 import subprocess
+import sys
 
 def run_inline_script():
     # Run inline scripts first
-    subprocess.run(["python", "scripts/inline_web.py"], check=True)
-    subprocess.run(["python", "scripts/inline_update.py"], check=True)
+    subprocess.run([sys.executable, "scripts/inline_web.py"], check=True)
+    subprocess.run([sys.executable, "scripts/inline_update.py"], check=True)
 
 def embed_files():
     data_dir = "data/www"
@@ -25,7 +26,11 @@ def embed_files():
     target_files = [
         "index_inlined.html",
         "update_inlined.html",
-        "login_inlined.html"
+        "login_inlined.html",
+        # The Tescom Connect Link's setup page on the setup network (self-contained)
+        "setup.html",
+        # Its status page on the Wi-Fi
+        "link.html"
     ]
     
     files = [os.path.join(data_dir, f) for f in target_files if os.path.exists(os.path.join(data_dir, f))]

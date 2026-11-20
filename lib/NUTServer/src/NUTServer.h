@@ -44,6 +44,12 @@ public:
         _control_username = username;
         _control_password = password;
     }
+    // A login is needed for commands and SET: the configured one, or the control login
+    // (with only the control login, the UPS can be read by anyone but run only by the app)
+    bool authNeeded() const {
+        return (_config.username.length() > 0 && _config.password.length() > 0) ||
+               (_control_username.length() > 0 && _control_password.length() > 0);
+    }
     
     // Esegue la gestione non bloccante delle connessioni e dei comandi
     void loop();

@@ -16,7 +16,7 @@
 class SetupHold {
 public:
     static const uint32_t DEFAULT_MAX_MS = 60000;
-    static const uint32_t DEFAULT_GRACE_MS = 20000;
+    static const uint32_t DEFAULT_GRACE_MS = 8000;
 
     explicit SetupHold(uint32_t max_ms = DEFAULT_MAX_MS, uint32_t grace_ms = DEFAULT_GRACE_MS)
         : _max_ms(max_ms), _grace_ms(grace_ms) {}

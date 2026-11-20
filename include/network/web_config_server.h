@@ -29,6 +29,8 @@ public:
     void begin(bool isAPMode);
     void loop();
     void setUPS(USBHostUPS* ups);
+    // The Link status page shows the easy mDNS name when this board has it
+    void setMdns(const class MdnsAnnouncer* mdns) { mdns_announcer = mdns; }
     // Active network link: captive portal address, status text, MAC (US-090)
     void setNetwork(AppNetworkManager* network);
     // Double reset on a board without Wi-Fi: new web credentials without the current
@@ -77,6 +79,18 @@ private:
     String saved_hostname;
 
     void handleConnect();
+    // The Wi-Fi networks around, for the setup page (an async scan: {"scanning":true} first)
+    void handleWifiScan();
+    // The full settings page
+    void sendIndex();
+    // GET /api/claim: the Tescom Connect claim (the app reads the code on the network)
+    void sendClaim();
+#ifdef LINK_WEB
+    // The Tescom Connect Link's only routes: setup on the setup network, a status page on
+    // the Wi-Fi, the claim; no login and no settings (the Connect app does the rest)
+    void registerLinkRoutes();
+    void handleLinkStatus();
+#endif
     // AP+STA after the Wi-Fi was saved on the setup network, then the restart (SetupHold)
     void startSetupHold(const String& ssid, const String& password);
     void handleLogs();
@@ -136,6 +150,7 @@ private:
     // Dati, stato e comandi dell'UPS; usb_ups resta solo per l'export della diagnostica USB
     IUpsSource* ups_source = nullptr;
     USBHostUPS* usb_ups = nullptr;
+    const class MdnsAnnouncer* mdns_announcer = nullptr;
 };
 
 #endif // WEB_CONFIG_SERVER_H

@@ -188,11 +188,11 @@ footer { color: var(--muted); font-size: .85rem; margin-top: 24px; }
         checks: ["The UPS cable is in the " + (dev ? "USB" : "UPS") + " port"] },
       { title: "Power on", hl: ["power", dev ? "comport" : "board"],
         body: '<p>Plug the charger into the ' + (dev ? '<b>COM</b>' : '<b>5 V</b>') + ' port.' + (dev ? ' A computer on COM works too, and shows the log at 115200 baud.' : '') + '</p>' +
-          '<p>After about 5 seconds the stick opens a Wi-Fi network for setup: <code>Tescom-Stick-Setup</code>.</p>' +
+          '<p>After about 5 seconds the stick opens a Wi-Fi network for setup: <code>Tescom Connect Link</code>.</p>' +
           '<div class="note">Development builds still use the shared password <code>12345678</code>. Shipped sticks will have their own password on the label.</div>',
-        checks: ["Tescom-Stick-Setup shows up in the Wi-Fi list"] },
+        checks: ["Tescom Connect Link shows up in the Wi-Fi list"] },
       { title: "Put the stick on your Wi-Fi", hl: ["wifi"],
-        body: '<ol><li>Join <code>Tescom-Stick-Setup</code> from a phone or laptop.</li>' +
+        body: '<ol><li>Join <code>Tescom Connect Link</code> from a phone or laptop.</li>' +
           '<li>Open <code>http://192.168.4.1</code> (it may open by itself).</li>' +
           '<li>Choose your Wi-Fi, type its password, save. The stick restarts and joins it.</li>' +
           '<li>Set the stick’s login when asked; keep it, the app needs it for UPS commands.</li></ol>' +

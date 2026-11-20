@@ -475,7 +475,7 @@ void NUTServer::processCommand(Print& client, int slot, const String& cmdLine) {
     String cmd = tokens[0];
     cmd.toUpperCase();
 
-    bool authRequired = (_config.username.length() > 0 && _config.password.length() > 0);
+    bool authRequired = authNeeded();
 
     // upsd check_command(): FLAG_USER commands need USERNAME and PASSWORD before any
     // other check, arguments included
@@ -978,7 +978,7 @@ void NUTServer::processCommand(Print& client, int slot, const String& cmdLine) {
 // client has not sent them. Whether they are right is checked by each command
 // (ACCESS-DENIED). With no NUT credentials configured every client is allowed.
 const char* NUTServer::missingCredentials(int slot) const {
-    bool authRequired = (_config.username.length() > 0 && _config.password.length() > 0);
+    bool authRequired = authNeeded();
     if (!authRequired) return nullptr;
     if (!_clientUsernameSet[slot]) return "USERNAME-REQUIRED";
     if (!_clientPasswordSet[slot]) return "PASSWORD-REQUIRED";
@@ -1026,7 +1026,7 @@ void NUTServer::setVar(Print& client, int slot, const String& upsName, const Str
 
     // user_checkaction(): the credentials that allow INSTCMD allow SET. USERNAME and
     // PASSWORD were sent (missingCredentials()), here they are wrong
-    bool authRequired = (_config.username.length() > 0 && _config.password.length() > 0);
+    bool authRequired = authNeeded();
     if (authRequired && !_clientAuthenticated[slot]) {
         rejectSet(client, slot, varName, value, "ACCESS-DENIED");
         return;
