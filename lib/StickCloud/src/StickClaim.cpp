@@ -96,6 +96,8 @@ bool parseHeartbeat(const std::string& body, HeartbeatAnswer& out) {
     JsonDocument doc;
     if (deserializeJson(doc, body)) return false;
     out.next = field(doc["next"]);
+    out.name = field(doc["name"]);
+    out.organization = field(doc["organization"]);
     if (doc["zabbix"].isUnbound()) return true;
     out.known = true;
     out.zabbix = zabbixOf(doc["zabbix"]);

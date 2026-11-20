@@ -185,6 +185,9 @@ void test_pre_approved_start_polls_soon(void) {
 
 void test_heartbeat_answer(void) {
     HeartbeatAnswer a;
+    TEST_ASSERT_TRUE(parseHeartbeat("{\"ok\":true,\"zabbix\":null,\"next\":\"sending\",\"name\":\"Tescom Leo SmartBox\",\"organization\":\"Dev\"}", a));
+    TEST_ASSERT_EQUAL_STRING("Tescom Leo SmartBox", a.name.c_str());
+    TEST_ASSERT_EQUAL_STRING("Dev", a.organization.c_str());
     TEST_ASSERT_TRUE(parseHeartbeat("{\"ok\":true,\"zabbix\":{\"server\":\"z.example\",\"port\":10052,\"host\":\"tc-1\"},\"next\":\"sending\"}", a));
     TEST_ASSERT_TRUE(a.known);
     TEST_ASSERT_EQUAL_STRING("z.example", a.zabbix.server.c_str());

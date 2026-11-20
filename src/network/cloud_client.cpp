@@ -348,6 +348,7 @@ void CloudClient::heartbeat() {
         bool read = StickClaim::parseHeartbeat(out, answer);
         StickClaim::Credentials changed;
         bool zabbix_changed = false;
+        bool named = false;
         {
             Guard g(_mutex);
             if (_heartbeat_error.length()) AppLogger::log("INFO", "[CLOUD] Heartbeat works again");
@@ -358,9 +359,22 @@ void CloudClient::heartbeat() {
                 zabbix_changed = answer.known && answer.zabbix != c.zabbix();
                 if (answer.known) c.setZabbix(answer.zabbix);
                 if (answer.next.size()) c.next = answer.next;
+                // The name the app and the setup pages show follows the account
+                if (answer.name.size() && answer.name != c.name) {
+                    c.name = answer.name;
+                    named = true;
+                }
+                if (answer.organization.size() && answer.organization != c.organization) {
+                    c.organization = answer.organization;
+                    named = true;
+                }
                 _flow.restore(c);
                 changed = c;
             }
+        }
+        if (named && !zabbix_changed) {
+            saveCredentials(changed);
+            AppLogger::log("INFO", "[CLOUD] Now \"%s\" (%s) in Tescom Connect", changed.name.c_str(), changed.organization.c_str());
         }
         // Readings start when the owner's UPS is added and on a plan, and stop when it no longer is
         if (zabbix_changed) {

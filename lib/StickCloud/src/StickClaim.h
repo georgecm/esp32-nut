@@ -74,6 +74,9 @@ struct HeartbeatAnswer {
     bool known = false;
     ZabbixTarget zabbix;
     std::string next;
+    // Its name and customer in the account, as they are now (renamed, or named after a new UPS)
+    std::string name;
+    std::string organization;
 };
 bool parseHeartbeat(const std::string& body, HeartbeatAnswer& out);
 
